@@ -1,0 +1,14 @@
+# Build output
+bin/
+obj/
+.vs/
+*.user
+*.suo
+TestResults/
+
+# Release output (published as GitHub releases, not in the repository)
+dist/
+
+# Local, private: company PC notes and Claude Code local settings
+CLAUDE.local.md
+.claude/settings.local.json

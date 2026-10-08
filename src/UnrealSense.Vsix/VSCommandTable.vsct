@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+  <Include href="KnownImageIds.vsct" />
+
+  <Commands package="guidUnrealSensePackage">
+
+    <Menus>
+      <Menu guid="guidUnrealSenseCmdSet" id="UnrealSenseMenu" priority="0x0600" type="Menu">
+        <Parent guid="guidUnrealSenseCmdSet" id="ExtensionsMenuGroup" />
+        <Strings>
+          <ButtonText>UnrealSense</ButtonText>
+        </Strings>
+      </Menu>
+    </Menus>
+
+    <Groups>
+      <Group guid="guidUnrealSenseCmdSet" id="ExtensionsMenuGroup" priority="0x0600">
+        <Parent guid="guidVSMainMenu" id="ExtensionsMenu" />
+      </Group>
+      <Group guid="guidUnrealSenseCmdSet" id="NavigationGroup" priority="0x0100">
+        <Parent guid="guidUnrealSenseCmdSet" id="UnrealSenseMenu" />
+      </Group>
+      <Group guid="guidUnrealSenseCmdSet" id="ProjectGroup" priority="0x0200">
+        <Parent guid="guidUnrealSenseCmdSet" id="UnrealSenseMenu" />
+      </Group>
+      <Group guid="guidUnrealSenseCmdSet" id="ToolsGroup" priority="0x0300">
+        <Parent guid="guidUnrealSenseCmdSet" id="UnrealSenseMenu" />
+      </Group>
+      <Group guid="guidUnrealSenseCmdSet" id="EditorContextGroup" priority="0x0110">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_CTXT_CODEWIN" />
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidUnrealSenseCmdSet" id="ShowUnrealExplorer" priority="0x0100" type="Button">
+        <Parent guid="guidUnrealSenseCmdSet" id="NavigationGroup" />
+        <Icon guid="ImageCatalogGuid" id="Hierarchy" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Unreal Explorer</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="FindBlueprintUsages" priority="0x0110" type="Button">
+        <Parent guid="guidUnrealSenseCmdSet" id="NavigationGroup" />
+        <Icon guid="ImageCatalogGuid" id="FindSymbol" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Find Blueprint Usages</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="GoToUnrealCounterpart" priority="0x0120" type="Button">
+        <Parent guid="guidUnrealSenseCmdSet" id="NavigationGroup" />
+        <Icon guid="ImageCatalogGuid" id="GoToDefinition" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <Strings>
+          <ButtonText>Go to Declaration / _Implementation</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="GenerateProjectFiles" priority="0x0100" type="Button">
+        <Icon guid="ImageCatalogGuid" id="BuildSolution" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Generate Project Files</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="OpenInUnrealEditor" priority="0x0110" type="Button">
+        <Icon guid="ImageCatalogGuid" id="Run" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Open in Unreal Editor</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="NewUnrealClass" priority="0x0090" type="Button">
+        <Parent guid="guidUnrealSenseCmdSet" id="ProjectGroup" />
+        <Icon guid="ImageCatalogGuid" id="AddClass" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <Strings>
+          <ButtonText>Unreal Class...</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="RefreshIndex" priority="0x0120" type="Button">
+        <Parent guid="guidUnrealSenseCmdSet" id="ProjectGroup" />
+        <Icon guid="ImageCatalogGuid" id="Refresh" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Rebuild UnrealSense Index</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="EnableOpenAssetsInEditor" priority="0x0115" type="Button">
+        <Parent guid="guidUnrealSenseCmdSet" id="ProjectGroup" />
+        <Icon guid="ImageCatalogGuid" id="Run" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <Strings>
+          <ButtonText>Open Blueprints in Unreal Editor...</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="FindSymbol" priority="0x0090" type="Button">
+        <Icon guid="ImageCatalogGuid" id="ClassPublic" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Go to Symbol...</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="FindFile" priority="0x0091" type="Button">
+        <Icon guid="ImageCatalogGuid" id="OpenFileDialog" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Go to File...</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="FindUsages" priority="0x0092" type="Button">
+        <Icon guid="ImageCatalogGuid" id="FindInFile" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Find Usages</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="RegenerateClangDatabase" priority="0x0130" type="Button">
+        <Icon guid="ImageCatalogGuid" id="Refresh" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Rebuild C++ Semantic Index (clangd)</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="DiagnoseIndexErrors" priority="0x0135" type="Button">
+        <Icon guid="ImageCatalogGuid" id="StatusError" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Diagnose C++ Index Errors</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="DownloadClangd" priority="0x0140" type="Button">
+        <Icon guid="ImageCatalogGuid" id="Download" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <Strings>
+          <ButtonText>Download clangd...</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="ToggleVsIndexing" priority="0x0090" type="Button">
+        <Parent guid="guidUnrealSenseCmdSet" id="ToolsGroup" />
+        <Icon guid="ImageCatalogGuid" id="Settings" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings>
+          <ButtonText>Use UnrealSense Instead of Visual Studio Indexing...</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidUnrealSenseCmdSet" id="ToggleVisualAssist" priority="0x0100" type="Button">
+        <Icon guid="ImageCatalogGuid" id="Extension" />
+        <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>TextChanges</CommandFlag>
+        <Strings>
+          <ButtonText>Enable/Disable Visual Assist</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+  </Commands>
+
+  <CommandPlacements>
+    <CommandPlacement guid="guidUnrealSenseCmdSet" id="FindBlueprintUsages" priority="0x0100">
+      <Parent guid="guidUnrealSenseCmdSet" id="EditorContextGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidUnrealSenseCmdSet" id="GoToUnrealCounterpart" priority="0x0110">
+      <Parent guid="guidUnrealSenseCmdSet" id="EditorContextGroup" />
+    </CommandPlacement>
+    <!-- Solution Explorer: Add > Unreal Class... on projects and filters/folders, next to New Item and Existing Item. -->
+    <CommandPlacement guid="guidUnrealSenseCmdSet" id="NewUnrealClass" priority="0x0300">
+      <Parent guid="guidSHLMainMenu" id="IDG_VS_CTXT_PROJECT_ADD_ITEMS" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidUnrealSenseCmdSet" id="ShowUnrealExplorer" priority="0x0100">
+      <Parent guid="guidSHLMainMenu" id="IDG_VS_WNDO_OTRWNDWS1" />
+    </CommandPlacement>
+  </CommandPlacements>
+
+  <KeyBindings>
+    <KeyBinding guid="guidUnrealSenseCmdSet" id="FindBlueprintUsages" editor="guidVSStd97" key1="B" mod1="Alt Shift" />
+    <KeyBinding guid="guidUnrealSenseCmdSet" id="GoToUnrealCounterpart" editor="guidVSStd97" key1="I" mod1="Alt Shift" />
+  </KeyBindings>
+
+  <Symbols>
+    <!-- Top-level Extensions menu (VS 2019+); not declared in the NuGet VSSDK headers. -->
+    <GuidSymbol name="guidVSMainMenu" value="{d309f791-903f-11d0-9efc-00a0c911004f}">
+      <IDSymbol name="ExtensionsMenu" value="0x0091" />
+    </GuidSymbol>
+    <GuidSymbol name="guidUnrealSensePackage" value="{9a0e5c1d-3b7f-4d6a-8e2c-5f1b7a9d3c11}" />
+    <GuidSymbol name="guidUnrealSenseCmdSet" value="{e4b2c8a6-1d3f-4a5b-9c7e-0f2d4b6a8c22}">
+      <IDSymbol name="UnrealSenseMenu" value="0x1000" />
+      <IDSymbol name="ExtensionsMenuGroup" value="0x1100" />
+      <IDSymbol name="NavigationGroup" value="0x1101" />
+      <IDSymbol name="ProjectGroup" value="0x1102" />
+      <IDSymbol name="EditorContextGroup" value="0x1103" />
+      <IDSymbol name="ShowUnrealExplorer" value="0x0100" />
+      <IDSymbol name="FindBlueprintUsages" value="0x0101" />
+      <IDSymbol name="GoToUnrealCounterpart" value="0x0102" />
+      <IDSymbol name="GenerateProjectFiles" value="0x0103" />
+      <IDSymbol name="OpenInUnrealEditor" value="0x0104" />
+      <IDSymbol name="RefreshIndex" value="0x0105" />
+      <IDSymbol name="FindSymbol" value="0x0106" />
+      <IDSymbol name="FindFile" value="0x0107" />
+      <IDSymbol name="FindUsages" value="0x0108" />
+      <IDSymbol name="RegenerateClangDatabase" value="0x0109" />
+      <IDSymbol name="DownloadClangd" value="0x010A" />
+      <IDSymbol name="ToggleVisualAssist" value="0x010B" />
+      <IDSymbol name="ToggleVsIndexing" value="0x010C" />
+      <IDSymbol name="DiagnoseIndexErrors" value="0x010D" />
+      <IDSymbol name="EnableOpenAssetsInEditor" value="0x010E" />
+      <IDSymbol name="NewUnrealClass" value="0x010F" />
+      <IDSymbol name="ToolsGroup" value="0x1104" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

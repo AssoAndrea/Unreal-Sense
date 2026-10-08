@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UnrealSense — Guida rapida</title>
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --text: #1d2330;
+    --muted: #5d6677;
+    --border: #e2e5eb;
+    --accent: #2f6fde;
+    --accent-soft: #e8f0fd;
+    --code-bg: #1e1f24;
+    --code-text: #d7dae0;
+    --code-type: #4ec9b0;
+    --code-macro: #c586c0;
+    --code-hint: #8a8f98;
+    --kbd-bg: #ffffff;
+    --kbd-border: #c9ced8;
+    --shadow: 0 1px 2px rgba(20, 30, 50, .06), 0 4px 16px rgba(20, 30, 50, .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14161b;
+      --surface: #1c1f26;
+      --text: #e6e8ec;
+      --muted: #9aa2b1;
+      --border: #2c313b;
+      --accent: #6aa1ff;
+      --accent-soft: #1f2b40;
+      --code-bg: #111216;
+      --kbd-bg: #262a33;
+      --kbd-border: #3a404c;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14161b;
+    --surface: #1c1f26;
+    --text: #e6e8ec;
+    --muted: #9aa2b1;
+    --border: #2c313b;
+    --accent: #6aa1ff;
+    --accent-soft: #1f2b40;
+    --code-bg: #111216;
+    --kbd-bg: #262a33;
+    --kbd-border: #3a404c;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  }
+  .page { max-width: 860px; margin: 0 auto; padding: 40px 16px 64px; }
+
+  header { margin-bottom: 32px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo {
+    width: 44px; height: 44px; border-radius: 11px; flex: none;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 20px;
+  }
+  h1 { font-size: 30px; line-height: 1.2; margin: 0; }
+  .subtitle { color: var(--muted); margin: 14px 0 0; font-size: 17px; }
+
+  h2 { font-size: 20px; margin: 40px 0 14px; }
+  h3 { font-size: 17px; margin: 0 0 6px; }
+  p { margin: 0 0 10px; }
+  p:last-child { margin-bottom: 0; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+    box-shadow: var(--shadow);
+  }
+  .grid { display: grid; gap: 14px; }
+
+  ol.steps { list-style: none; counter-reset: step; margin: 0; padding: 0; }
+  ol.steps li { counter-increment: step; position: relative; padding: 2px 0 12px 44px; }
+  ol.steps li:last-child { padding-bottom: 0; }
+  ol.steps li::before {
+    content: counter(step);
+    position: absolute; left: 0; top: 0;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent-soft); color: var(--accent);
+    display: grid; place-items: center; font-weight: 700; font-size: 14px;
+  }
+  .note { color: var(--muted); font-size: 15px; margin-top: 14px; }
+
+  kbd {
+    font: 600 13px/1 "Segoe UI", system-ui, sans-serif;
+    background: var(--kbd-bg);
+    border: 1px solid var(--kbd-border);
+    border-bottom-width: 2px;
+    border-radius: 6px;
+    padding: 3px 7px;
+    white-space: nowrap;
+  }
+  code {
+    font: 14px/1.4 Consolas, "Cascadia Mono", ui-monospace, monospace;
+    background: var(--accent-soft);
+    padding: 1px 6px;
+    border-radius: 5px;
+  }
+  .menu { font-weight: 600; }
+
+  .editor {
+    background: var(--code-bg);
+    color: var(--code-text);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin: 14px 0 6px;
+    font: 14px/1.7 Consolas, "Cascadia Mono", ui-monospace, monospace;
+    overflow-x: auto;
+  }
+  .editor .line { white-space: pre; }
+  .editor .macro { color: var(--code-macro); }
+  .editor .type { color: var(--code-type); }
+  .editor .hint { color: var(--code-hint); font-style: italic; margin-left: 18px; }
+  .caption { color: var(--muted); font-size: 14px; }
+
+  .feature { display: grid; grid-template-columns: 40px 1fr; gap: 14px; align-items: start; }
+  .icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    background: var(--accent-soft); color: var(--accent);
+    display: grid; place-items: center;
+  }
+  .icon svg { width: 22px; height: 22px; }
+
+  .settings { width: 100%; border-collapse: collapse; }
+  .settings td { padding: 12px 0; border-top: 1px solid var(--border); vertical-align: top; }
+  .settings tr:first-child td { border-top: 0; padding-top: 0; }
+  .settings td:first-child { font-weight: 600; padding-right: 20px; width: 40%; }
+
+  footer { margin-top: 48px; color: var(--muted); font-size: 14px; text-align: center; }
+
+  @media (max-width: 560px) {
+    h1 { font-size: 26px; }
+    .settings td { display: block; width: auto; padding: 0; }
+    .settings td:first-child { padding: 12px 0 2px; }
+    .settings tr:first-child td:first-child { padding-top: 0; }
+    .settings td:last-child { border-top: 0; padding-bottom: 4px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="brand">
+      <div class="logo" aria-hidden="true">U</div>
+      <h1>UnrealSense — guida rapida</h1>
+    </div>
+    <p class="subtitle">
+      Un aiuto per i progetti Unreal in Visual Studio 2022 e 2026: ti dice <strong>dove le tue classi C++ sono usate
+      nei Blueprint</strong>, suggerisce gli specifier di <code>UPROPERTY</code>/<code>UFUNCTION</code> e segnala gli
+      errori tipici di Unreal mentre scrivi. Funziona anche con l'editor di Unreal chiuso.
+    </p>
+  </header>
+
+  <h2>Installare e aggiornare</h2>
+  <div class="card">
+    <ol class="steps">
+      <li>Chiudi Visual Studio.</li>
+      <li>Fai doppio clic sul file <code>UnrealSense-&lt;versione&gt;.vsix</code>.</li>
+      <li>Spunta le versioni di Visual Studio in cui la vuoi (2022, 2026) e premi <span class="menu">Install</span>.</li>
+    </ol>
+    <p class="note">
+      Per aggiornare si fa la stessa cosa con il file nuovo, senza disinstallare. Se nell'elenco non compare la tua
+      versione di Visual Studio, metti <code>Install-UnrealSense.ps1</code> accanto al <code>.vsix</code> e fai clic
+      destro sullo script › <span class="menu">Esegui con PowerShell</span>.
+    </p>
+  </div>
+
+  <h2>Primo avvio</h2>
+  <div class="card">
+    <p>
+      Apri la soluzione del progetto come fai di solito. UnrealSense riconosce il progetto da solo e in pochi secondi
+      legge le classi C++ e i Blueprint (la prima volta può volerci un po' di più). Da lì in poi funziona tutto in
+      automatico.
+    </p>
+  </div>
+
+  <h2>Cosa trovi nel codice</h2>
+  <div class="grid">
+
+    <div class="card feature">
+      <div class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 15v-4"/><path d="M12 15V8"/><path d="M16 15v-6"/></svg>
+      </div>
+      <div>
+        <h3>Quanti Blueprint usano una classe</h3>
+        <p>
+          Accanto a classi, funzioni e proprietà esposte ai Blueprint compare una scritta grigia. <strong>Cliccala</strong>
+          per vedere l'elenco dei Blueprint.
+        </p>
+        <div class="editor" aria-label="Esempio">
+          <div class="line"><span class="macro">UCLASS</span>()</div>
+          <div class="line"><span class="macro">class</span> <span class="type">AMyCharacter</span> : <span class="macro">public</span> <span class="type">ACharacter</span><span class="hint">12 derived Blueprints</span></div>
+          <div class="line">{</div>
+          <div class="line">    <span class="macro">UFUNCTION</span>(BlueprintCallable)</div>
+          <div class="line">    <span class="macro">void</span> Jump();<span class="hint">3 Blueprint usages</span></div>
+        </div>
+        <p class="caption">Il conteggio include anche i Blueprint che derivano da altri Blueprint o da classi C++ figlie (indicati con "via …").</p>
+      </div>
+    </div>
+
+    <div class="card feature">
+      <div class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      </div>
+      <div>
+        <h3>Cercare gli usi nei Blueprint</h3>
+        <p>
+          Metti il cursore sul nome di una classe, funzione o proprietà e premi <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>B</kbd>
+          (oppure clic destro › <span class="menu">Find Blueprint Usages</span>). Si apre la finestra
+          <span class="menu">Blueprint Usages</span>: doppio clic su una riga per mostrare il file dell'asset in Esplora file.
+        </p>
+      </div>
+    </div>
+
+    <div class="card feature">
+      <div class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+      </div>
+      <div>
+        <h3>Informazioni al passaggio del mouse</h3>
+        <p>
+          Passa il mouse su uno specifier (es. <code>BlueprintReadWrite</code>) per leggerne la spiegazione, o sul nome di
+          una classe, funzione o proprietà per vedere dove è usata nei Blueprint.
+        </p>
+      </div>
+    </div>
+
+    <div class="card feature">
+      <div class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/></svg>
+      </div>
+      <div>
+        <h3>Suggerimenti mentre scrivi</h3>
+        <p>
+          Dentro <code>UPROPERTY(...)</code>, <code>UFUNCTION(...)</code>, <code>UCLASS(...)</code> ecc. Visual Studio
+          propone gli specifier validi per la tua versione di Unreal, con la spiegazione. Funziona anche per i valori, per
+          esempio le <code>Category</code> già usate nel progetto o la funzione da usare in <code>ReplicatedUsing</code>.
+        </p>
+      </div>
+    </div>
+
+    <div class="card feature">
+      <div class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.3 1 2.3h6c0-1 .4-1.8 1-2.3A7 7 0 0 0 12 2Z"/></svg>
+      </div>
+      <div>
+        <h3>Avvisi e correzioni rapide</h3>
+        <p>
+          Gli errori tipici di Unreal vengono sottolineati prima di compilare: include <code>.generated.h</code> mancante o
+          sbagliato, <code>GENERATED_BODY()</code> mancante, prefissi A/U/F/E/I sbagliati, <code>_Implementation</code>
+          mancante e altri. Quando compare la <strong>lampadina</strong> puoi applicare la correzione con un clic (per
+          esempio crea il corpo di <code>_Implementation</code> nel <code>.cpp</code>). Gli stessi avvisi sono anche
+          nell'Elenco errori.
+        </p>
+      </div>
+    </div>
+
+    <div class="card feature">
+      <div class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></svg>
+      </div>
+      <div>
+        <h3>Da dichiarazione a implementazione</h3>
+        <p>
+          Su una <code>UFUNCTION</code> premi <kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>I</kbd> (o clic destro ›
+          <span class="menu">Go to Declaration / _Implementation</span>) per saltare alla sua implementazione, a
+          <code>_Implementation</code> o <code>_Validate</code>, e ritorno.
+        </p>
+      </div>
+    </div>
+
+    <div class="card feature">
+      <div class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M7 12h14"/><path d="M11 18h10"/><path d="M3 6v12"/></svg>
+      </div>
+      <div>
+        <h3>Unreal Explorer</h3>
+        <p>
+          Menu <span class="menu">Extensions › UnrealSense › Unreal Explorer</span> (o <span class="menu">View › Other
+          Windows</span>). Mostra i moduli del progetto, i plugin, i Blueprint raggruppati per classe C++ di origine e i
+          file di configurazione, con una casella di ricerca.
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  <h2>Impostazioni</h2>
+  <div class="card">
+    <p style="margin-bottom:14px">In <span class="menu">Tools › Options › UnrealSense</span>. Le più utili:</p>
+    <table class="settings">
+      <tr>
+        <td>Show Blueprint usage hints</td>
+        <td>Accende o spegne le scritte grigie nel codice.</td>
+      </tr>
+      <tr>
+        <td>Show hints for unused Blueprint API</td>
+        <td>Mostra anche "no Blueprint usages" sulle funzioni e proprietà esposte ai Blueprint ma mai usate: utile per fare pulizia.</td>
+      </tr>
+      <tr>
+        <td>Unreal project</td>
+        <td>Da impostare solo se UnrealSense apre il progetto sbagliato (capita con soluzioni che ne contengono più di uno).</td>
+      </tr>
+    </table>
+  </div>
+
+  <footer>UnrealSense</footer>
+</div>
+</body>
+</html>

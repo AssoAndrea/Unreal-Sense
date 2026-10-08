@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <RootNamespace>UnrealSense</RootNamespace>
+    <AssemblyName>UnrealSense.Core</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Visual Studio ships Newtonsoft.Json 13.x, so the VSIX does not need to redistribute it. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+  </ItemGroup>
+
+</Project>

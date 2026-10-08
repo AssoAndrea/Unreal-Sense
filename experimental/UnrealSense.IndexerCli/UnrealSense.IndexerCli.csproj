@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>usindex</AssemblyName>
+    <RootNamespace>UnrealSense.IndexerCli</RootNamespace>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\UnrealSense.Indexer\UnrealSense.Indexer.csproj" />
+    <!-- Snapshot of src/UnrealSense.Core (read-only, used only by the clangd oracle): referencing the project
+         would rebuild it inside src/ while another agent works there. -->
+    <Reference Include="UnrealSense.Core">
+      <HintPath>..\lib\UnrealSense.Core.dll</HintPath>
+    </Reference>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+  </ItemGroup>
+
+</Project>
