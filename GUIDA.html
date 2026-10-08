@@ -299,6 +299,29 @@
       </div>
     </div>
 
+    <div class="card feature">
+      <div class="icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M12 12v6"/><path d="M9 15h6"/></svg>
+      </div>
+      <div>
+        <h3>Creare una nuova classe Unreal</h3>
+        <p>
+          In Esplora soluzioni clic destro su un progetto o una cartella › <span class="menu">Aggiungi › Unreal Class...</span>
+          (oppure <span class="menu">Extensions › UnrealSense › Unreal Class...</span>, o il pulsante <b>New class</b>
+          dell'Unreal Explorer). Scegli il nome (il prefisso <code>A</code>/<code>U</code>/<code>F</code>/<code>E</code> lo
+          aggiunge UnrealSense), la classe padre (<b>Common</b> per le più usate, <b>All Classes</b> per tutte quelle di
+          progetto, plugin ed engine) e la cartella: Public mette il <code>.h</code> in <code>Public</code> e il
+          <code>.cpp</code> in <code>Private</code>.
+        </p>
+        <p>
+          I file nascono come quelli dell'Unreal Editor (<code>&lt;MODULO&gt;_API</code>, include giusti, funzioni tipiche
+          del padre), vengono aggiunti al progetto e aperti. Se manca la dipendenza dal modulo del padre (per esempio
+          <code>UMG</code>), una casella propone di aggiungerla al <code>.Build.cs</code>. Gli include restano rossi finché
+          non esegui <b>Generate Project Files</b>; il <code>.generated.h</code> esiste dopo la prima compilazione.
+        </p>
+      </div>
+    </div>
+
   </div>
 
   <h2>Impostazioni</h2>

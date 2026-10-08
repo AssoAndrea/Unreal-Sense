@@ -63,6 +63,26 @@ alla sua implementazione, a `_Implementation` o `_Validate`, e ritorno.
 Menu **Extensions › UnrealSense › Unreal Explorer** (o **View › Other Windows**). Mostra i moduli del progetto, i
 plugin, i Blueprint raggruppati per classe C++ di origine e i file di configurazione, con una casella di ricerca.
 
+### Creare una nuova classe Unreal
+
+In Esplora soluzioni fai clic destro su un progetto o una cartella › **Aggiungi › Unreal Class...** (oppure
+**Extensions › UnrealSense › Unreal Class...**, o il pulsante **New class** dell'Unreal Explorer). Scegli:
+
+- il **nome** della classe (il prefisso `A`, `U`, `F`, `E` lo aggiunge UnrealSense);
+- la **classe padre**: in **Common** le più usate (Actor, Character, Actor Component, Interface, Struct, Enum, Empty,
+  subsystem, User Widget...), in **All Classes** tutte quelle del progetto, dei plugin e dell'engine (la prima volta
+  la lista si riempie dopo qualche secondo);
+- la **cartella**: Public mette il `.h` in `Public` e il `.cpp` in `Private`.
+
+UnrealSense crea i file come l'Unreal Editor (con `<MODULO>_API`, gli include giusti e le funzioni tipiche del padre,
+per esempio `BeginPlay` e `Tick` per un Actor), li aggiunge al progetto e li apre. Struct ed enum hanno solo il `.h`.
+Se il modulo non dipende dal modulo della classe padre (per esempio `UMG` per un User Widget), una casella propone di
+aggiungerlo al `.Build.cs`.
+
+Gli include dei file nuovi restano sottolineati in rosso finché non esegui **Generate Project Files**: è un limite dei
+progetti generati da Unreal, la compilazione funziona comunque. Il file `.generated.h` esiste solo dopo la prima
+compilazione.
+
 ## Impostazioni
 
 **Tools › Options › UnrealSense**. Le più utili:

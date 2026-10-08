@@ -48,6 +48,7 @@ src/UnrealSense.Core     netstandard2.0, no VS dependency, unit-tested
   Reflection/            specifier catalog (built-in + UHT sources + ObjectMacros.h docs)
   Analysis/              inspections and code fixes
   Workspace/             symbol index, symbol locator, UnrealWorkspace (loading, file watching)
+  Templates/             New Unreal Class: parent class catalog, engine header scan, class generator, Build.cs edits
   Navigation/, Clang/    Go to Symbol/File index and clangd integration (experimental, off)
 src/UnrealSense.Vsix     VSIX (net48, VSSDK + MEF + Community.VisualStudio.Toolkit)
 tests/                   xUnit tests (unit tests + integration tests against a real UE project)

@@ -10,6 +10,8 @@ to Visual Studio. Read this file before changing anything; `README.md` describes
 - The user tests on a **company PC** that you cannot access. They paste logs from
   `%LOCALAPPDATA%\UnrealSense\Logs\UnrealSense.log`. When a problem cannot be reproduced here, add log lines that
   will tell the cause on their machine, ship a version, and ask for exactly those lines.
+- Git: public repository https://github.com/AssoAndrea/Unreal-Sense (branch `main`). Commit and push only when the
+  user asks; `dist/`, `CLAUDE.local.md` and `.claude/settings.local.json` are ignored.
 - **The repository is public.** Project names and paths of the company PC are in `CLAUDE.local.md` (not in git):
   never write them in tracked files or commit messages; call the projects GameA and GameB.
 - Company PC facts: i9-14900KF (24C/32T), 64 GB RAM, Visual Assist installed (ReSharper cannot be installed), heavy
@@ -60,6 +62,7 @@ src/UnrealSense.Vsix      VSIX: net48, VSSDK + MEF + Community.VisualStudio.Tool
   Services/               WorkspaceService (which project is loaded), DocumentAnalysis (per-buffer parse), Log,
                           UnrealEditorBridge (open assets in the editor), ErrorListService (+ dormant ClangdService, FindUsagesService, IndexDiagnostics...)
   ToolWindows/            Unreal Explorer, Blueprint Usages (+ dormant Find Usages)
+  Dialogs/                New Unreal Class dialog (code-built WPF); Services/NewClassService caches the engine scan
   Options/General.cs      Tools › Options › UnrealSense
 tests/UnrealSense.Core.Tests   xUnit (net8.0); integration tests use C:\Unreal Project\Gym and skip if missing
 tools/UnrealSense.Cli          debugging CLI (net8.0): run Core code against a real project
