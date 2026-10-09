@@ -184,6 +184,10 @@ namespace UnrealSense.Indexer
                     if (pref < bestKind) { best = s; bestKind = pref; }
                 }
             }
+            // on the name of a constructor's own declaration clangd answers with the class (its hover says "struct X" and
+            // its references are the type's): the constructor has no references of its own in clangd's index
+            if (best >= 0 && (SymFlags[best] & (uint)DeclFlags.Ctor) != 0 && SymFile[best] == f && SymLine[best] == line && SymParent[best] > 0)
+                best = SymParent[best];
             return best;
         }
 
@@ -197,6 +201,29 @@ namespace UnrealSense.Indexer
                 if (ov != null) foreach (var o in ov) if (!list.Contains(o)) list.Add(o);
             }
             return list;
+        }
+
+        int[][] overriddenBy;
+
+        /// <summary>
+        /// What Find Usages reports for a symbol, as clangd does: references of the symbol and of the methods it overrides,
+        /// plus the declarations of the methods that directly override it (AController::SetPawn lists
+        /// APlayerController::SetPawn ... override).
+        /// </summary>
+        public HashSet<(int File, int Line, int Col, byte Kind)> Usages(int sym)
+        {
+            var result = new HashSet<(int, int, int, byte)>();
+            foreach (var s in RelatedSymbols(sym)) foreach (var r in RefsOf(s)) result.Add(r);
+            if (overriddenBy == null)
+            {
+                var lists = new List<int>[SymbolCount];
+                for (int i = 0; i < SymOverrides.Length; i++)
+                    if (SymOverrides[i] != null) foreach (var b in SymOverrides[i]) (lists[b] ??= new List<int>()).Add(i);
+                overriddenBy = Array.ConvertAll(lists, l => l?.ToArray());
+            }
+            var by = overriddenBy[sym];
+            if (by != null) foreach (var o in by) if (SymFile[o] >= 0) result.Add((SymFile[o], SymLine[o], SymCol[o], (byte)UnrealSense.Indexer.RefKind.Decl));
+            return result;
         }
 
         public IEnumerable<(int File, int Line, int Col, byte Kind)> RefsOf(int sym)

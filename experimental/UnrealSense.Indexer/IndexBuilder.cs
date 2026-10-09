@@ -30,6 +30,8 @@ namespace UnrealSense.Indexer
         public HashSet<int> Undefs;
         public List<string> Includes;
         public List<(string Include, Dictionary<int, MacroDef> Macros)> IncludeContexts;
+        public HashSet<int> UnknownInConditions;
+        public Dictionary<int, MacroDef> OwnUndefined; // its own macros that start undefined (include guard, own defaults)
         public int Lines;
     }
 
@@ -55,12 +57,15 @@ namespace UnrealSense.Indexer
         };
         static readonly string[] sourceExt = { ".h", ".cpp", ".inl", ".hpp", ".c", ".cc" };
 
+        static string Mem() => $"[heap {GC.GetTotalMemory(false) / 1073741824.0:F2} GB, ws {Process.GetCurrentProcess().WorkingSet64 / 1073741824.0:F2} GB]";
+
         public SymbolTable Table;
         public List<SourceFile> FilesOut;
 
         public IndexData Build(BuildOptions o, out BuildStats stats)
         {
             stats = new BuildStats();
+            tokenizeTicks = 0;
             var total = Stopwatch.StartNew();
             var sw = Stopwatch.StartNew();
             int threads = o.Threads > 0 ? o.Threads : Environment.ProcessorCount;
@@ -121,6 +126,7 @@ namespace UnrealSense.Indexer
                     try { sf.Bytes = ReadSource(sf.Path); } catch (Exception) { sf.Bytes = Array.Empty<byte>(); }
                     var pp = new Preprocessor(env, true).Run(sf.Bytes, false, true);
                     sf.Defines = pp.Defines; sf.Undefs = pp.Undefs; sf.Includes = pp.Includes; sf.Lines = pp.Lines; sf.IncludeContexts = pp.IncludeContexts;
+                    sf.UnknownInConditions = pp.UnknownInConditions;
                     if (o.Engine) return;
                     var dir = sf.Path.Substring(0, sf.Path.LastIndexOf('/'));
                     foreach (var inc in pp.Includes)
@@ -141,22 +147,36 @@ namespace UnrealSense.Indexer
             stats.Lines = all.Sum(f => (long)f.Lines);
 
             // global macro table: header definitions; helper macros #undef'd in the same file stay local
-            var global = new Dictionary<int, MacroDef>();
-            foreach (var f in all)
-            {
-                if (f.Defines == null) continue;
-                bool header = !f.Path.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase) && !f.Path.EndsWith(".c", StringComparison.OrdinalIgnoreCase);
-                if (!header) continue;
-                foreach (var d in f.Defines)
-                {
-                    if (f.Undefs != null && f.Undefs.Contains(d.Name)) continue;
-                    if (global.TryGetValue(d.Name, out var ex)) { if (ex.BodyKey != d.BodyKey) ex.Ambiguous = true; }
-                    else global[d.Name] = d;
-                }
-            }
+            var global = BuildGlobalMacros(all);
             env.Global = global;
+            // Phase 0 evaluated each file's #if before the global table existed: a define computed from another header's
+            // macro got its fallback value (CoreMiscDefines.h: WITH_EDITORONLY_DATA = 0 because PLATFORM_CAN_SUPPORT_EDITORONLY_DATA,
+            // from WindowsPlatform.h, was unknown; then every "#if WITH_EDITORONLY_DATA" member was skipped). Re-run the
+            // directives of the files whose conditions named a macro defined elsewhere, until the table is stable.
+            int rerun = 0, rounds = 0;
+            HashSet<int> changed = null;
+            for (; rounds < 4; rounds++)
+            {
+                var again = all.Where(f => IsHeader(f.Path) && f.UnknownInConditions != null && f.UnknownInConditions.Any(n => changed?.Contains(n) ?? global.ContainsKey(n))).ToList();
+                if (again.Count == 0) break;
+                rerun += again.Count;
+                foreach (var f in again) f.OwnUndefined = OwnUndefined(f, global);
+                Parallel.ForEach(again, po, f =>
+                {
+                    var pp = new Preprocessor(env, true).Run(f.Bytes, false, true, f.OwnUndefined);
+                    f.Defines = pp.Defines; f.Undefs = pp.Undefs; f.IncludeContexts = pp.IncludeContexts; f.UnknownInConditions = pp.UnknownInConditions;
+                    if (pp.Includes.Count > 0) f.Includes = pp.Includes;
+                });
+                var next = BuildGlobalMacros(all);
+                changed = new HashSet<int>();
+                foreach (var kv in next) if (!global.TryGetValue(kv.Key, out var old) || old.BodyKey != kv.Value.BodyKey) changed.Add(kv.Key);
+                foreach (var k in global.Keys) if (!next.ContainsKey(k)) changed.Add(k);
+                env.Global = global = next;
+                if (changed.Count == 0) break;
+            }
+            foreach (var f in all) f.OwnUndefined = OwnUndefined(f, global);
             stats.Phase0 = sw.Elapsed.TotalSeconds;
-            o.Log($"phase 0 (read + directives{(o.Engine ? "" : ", include closure in " + waves + " waves")}): {all.Count} files ({stats.ResolvedFiles} to resolve), {stats.Bytes / 1048576.0:F0} MB, {stats.Lines:N0} lines, {global.Count:N0} macros in {sw.Elapsed.TotalSeconds:F1}s");
+            o.Log($"phase 0 (read + directives{(o.Engine ? "" : ", include closure in " + waves + " waves")}): {all.Count} files ({stats.ResolvedFiles} to resolve), {stats.Bytes / 1048576.0:F0} MB, {stats.Lines:N0} lines, {global.Count:N0} macros ({rerun} files re-evaluated in {rounds} rounds) in {sw.Elapsed.TotalSeconds:F1}s " + Mem());
 
             // ---------------------------------------------------------------- parse units
             // A file included "with parameters" (the includer #defines macros, #includes it, then #undefs them, e.g.
@@ -198,9 +218,10 @@ namespace UnrealSense.Indexer
                 try { parser.ParseFile(); } catch (Exception ex) { o.Log($"pass 1 failed on {u.File.Path}: {ex.Message}"); }
                 fileDecls[u.Index] = new FileDecls { FileId = u.File.Id, Decls = parser.Decls };
             });
+            double tokCpu1 = tokenizeTicks / (double)Stopwatch.Frequency;
             stats.Decls = fileDecls.Sum(f => f.Decls.Count);
             stats.Pass1 = sw.Elapsed.TotalSeconds;
-            o.Log($"pass 1 (declarations): {stats.Decls:N0} declarations in {sw.Elapsed.TotalSeconds:F1}s ({stats.Bytes / 1048576.0 / Math.Max(0.001, sw.Elapsed.TotalSeconds):F0} MB/s)");
+            o.Log($"pass 1 (declarations): {stats.Decls:N0} declarations in {sw.Elapsed.TotalSeconds:F1}s ({stats.Bytes / 1048576.0 / Math.Max(0.001, sw.Elapsed.TotalSeconds):F0} MB/s, tokenize {tokCpu1:F1}s CPU) " + Mem());
 
             // ---------------------------------------------------------------- merge
             sw.Restart();
@@ -209,7 +230,7 @@ namespace UnrealSense.Indexer
             var overrides = ComputeOverrides(table, po);
             stats.Symbols = table.All.Count;
             stats.Merge = sw.Elapsed.TotalSeconds;
-            o.Log($"merge: {table.All.Count:N0} symbols, {overrides.Count:N0} overrides in {sw.Elapsed.TotalSeconds:F1}s");
+            o.Log($"merge: {table.All.Count:N0} symbols, {overrides.Count:N0} overrides in {sw.Elapsed.TotalSeconds:F1}s " + Mem());
 
             // ---------------------------------------------------------------- pass 2: references
             sw.Restart();
@@ -231,6 +252,7 @@ namespace UnrealSense.Indexer
             });
             stats.ResolvedMember = (int)rm; stats.UnresolvedMemberUnknownRecv = (int)ru; stats.UnresolvedMemberNotFound = (int)rn; stats.UnresolvedNames = (int)un;
             stats.Pass2 = sw.Elapsed.TotalSeconds;
+            double tokCpu2 = tokenizeTicks / (double)Stopwatch.Frequency - tokCpu1;
             var refsPerFile = new List<RefRec>[all.Count];
             var unresolvedPerFile = new List<UnresolvedRec>[all.Count];
             foreach (var u in units)
@@ -241,7 +263,7 @@ namespace UnrealSense.Indexer
             }
             stats.Refs = refsPerFile.Sum(r => r?.Count ?? 0);
             stats.Unresolved = unresolvedPerFile.Sum(r => r?.Count ?? 0);
-            o.Log($"pass 2 (references): {stats.Refs:N0} references, {stats.Unresolved:N0} unresolved in {sw.Elapsed.TotalSeconds:F1}s; member accesses: {rm:N0} resolved, {ru:N0} unknown receiver, {rn:N0} member not found; {un:N0} unresolved names");
+            o.Log($"pass 2 (references): {stats.Refs:N0} references, {stats.Unresolved:N0} unresolved in {sw.Elapsed.TotalSeconds:F1}s; member accesses: {rm:N0} resolved, {ru:N0} unknown receiver, {rn:N0} member not found; {un:N0} unresolved names; tokenize {tokCpu2:F1}s CPU " + Mem());
 
             var data = IndexData.Create(all, table, overrides, refsPerFile, unresolvedPerFile, projectDir, engineDir, o.Engine);
             stats.PeakWorkingSet = Process.GetCurrentProcess().PeakWorkingSet64;
@@ -250,6 +272,43 @@ namespace UnrealSense.Indexer
             foreach (var f in all) f.Bytes = null;
             stats.Total = total.Elapsed.TotalSeconds;
             return data;
+        }
+
+        static bool IsHeader(string path) => !path.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase) && !path.EndsWith(".c", StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// One definition per macro name. A definition guarded by "#ifndef NAME" is a fallback: a definition elsewhere wins
+        /// (HAL/Platform.h: PLATFORM_CAN_SUPPORT_EDITORONLY_DATA 0 only if WindowsPlatform.h did not set it to 1).
+        /// </summary>
+        static Dictionary<int, MacroDef> BuildGlobalMacros(List<SourceFile> all)
+        {
+            var global = new Dictionary<int, MacroDef>();
+            foreach (var f in all)
+            {
+                if (f.Defines == null || !IsHeader(f.Path)) continue;
+                foreach (var d in f.Defines)
+                {
+                    if (f.Undefs != null && f.Undefs.Contains(d.Name)) continue;
+                    d.Ambiguous = false;
+                    if (!global.TryGetValue(d.Name, out var ex)) global[d.Name] = d;
+                    else if (ex.IsDefault && !d.IsDefault) global[d.Name] = d;
+                    else if (ex.IsDefault == d.IsDefault && ex.BodyKey != d.BodyKey) ex.Ambiguous = true;
+                }
+            }
+            return global;
+        }
+
+        /// <summary>
+        /// Its own macros whose global definition is its own (include guard, its own fallback with nobody overriding it):
+        /// they start undefined when the file is read, as when the compiler first includes it.
+        /// </summary>
+        static Dictionary<int, MacroDef> OwnUndefined(SourceFile f, Dictionary<int, MacroDef> global)
+        {
+            if (f.Defines == null || f.Defines.Count == 0) return null;
+            Dictionary<int, MacroDef> r = null;
+            foreach (var d in f.Defines)
+                if (global.TryGetValue(d.Name, out var g) && ReferenceEquals(g, d)) (r ??= new Dictionary<int, MacroDef>())[d.Name] = MacroDef.Undefined;
+            return r;
         }
 
         static readonly int CurrentFileId = Names.Intern("CURRENT_FILE_ID");
@@ -300,9 +359,25 @@ namespace UnrealSense.Indexer
         }
 
         /// <summary>Preprocess + macro rewrites; identical in both passes.</summary>
+        static long tokenizeTicks;
+
         static (Token[], int, FileMacros) Tokenize(ParseUnit u, MacroEnv env)
         {
-            var pp = new Preprocessor(env, false).Run(u.File.Bytes, true, false, u.Context);
+            long t0 = Stopwatch.GetTimestamp();
+            try { return TokenizeCore(u, env); }
+            finally { Interlocked.Add(ref tokenizeTicks, Stopwatch.GetTimestamp() - t0); }
+        }
+
+        // One token array per thread, reused file after file: allocating ~4x the source size per file (large object heap,
+        // zeroed) twice per build cost more CPU than lexing itself. The arrays never outlive the unit being parsed.
+        [ThreadStatic] static Token[] tokenBuffer;
+
+        static (Token[], int, FileMacros) TokenizeCore(ParseUnit u, MacroEnv env)
+        {
+            var start = u.File.OwnUndefined;
+            if (u.Context != null) { start = start == null ? u.Context : new Dictionary<int, MacroDef>(start); if (start != u.Context) foreach (var kv in u.Context) start[kv.Key] = kv.Value; }
+            var pp = new Preprocessor(env, false).Run(u.File.Bytes, true, false, start, tokenBuffer);
+            if (pp.Tokens.Length > (tokenBuffer?.Length ?? 0)) tokenBuffer = pp.Tokens;
             int count = pp.Count;
             Token[] toks = pp.Tokens;
             FileMacros fm;

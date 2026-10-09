@@ -121,7 +121,7 @@ namespace UnrealSense.IndexerCli
             int sym = data.SymbolAt(file, line, col);
             if (sym < 0) { Console.WriteLine($"no symbol at {file}:{line}:{col} (load {load:F0} ms)"); return 1; }
             var related = data.RelatedSymbols(sym);
-            var refs = related.SelectMany(s => data.RefsOf(s)).Distinct().OrderBy(r => data.Files[r.File], StringComparer.OrdinalIgnoreCase).ThenBy(r => r.Line).ThenBy(r => r.Col).ToList();
+            var refs = data.Usages(sym).OrderBy(r => data.Files[r.File], StringComparer.OrdinalIgnoreCase).ThenBy(r => r.Line).ThenBy(r => r.Col).ToList();
             var uncertain = data.UnresolvedOf(data.SymNames[sym]).Where(u => u.Kind != 3).ToList();
             double query = sw.Elapsed.TotalMilliseconds;
             Console.WriteLine($"symbol: {(SymKind)data.SymKinds[sym]} {data.QualifiedName(sym)}" + (related.Count > 1 ? $" (+ overridden: {string.Join(", ", related.Skip(1).Select(data.QualifiedName))})" : ""));
@@ -164,9 +164,8 @@ namespace UnrealSense.IndexerCli
                 int uncertain = 0;
                 if (sym >= 0)
                 {
-                    foreach (var s in data.RelatedSymbols(sym))
-                        foreach (var x in data.RefsOf(s))
-                            if (InScope(data.Files[x.File])) ours.Add(Key(data.Files[x.File], x.Line, x.Col));
+                    foreach (var x in data.Usages(sym))
+                        if (InScope(data.Files[x.File])) ours.Add(Key(data.Files[x.File], x.Line, x.Col));
                     uncertain = data.UnresolvedOf(data.SymNames[sym]).Count(u => u.Kind != 3 && InScope(data.Files[u.File]));
                 }
                 int tp = ours.Count(expected.Contains);

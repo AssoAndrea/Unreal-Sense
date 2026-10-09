@@ -250,9 +250,21 @@ namespace UnrealSense.Indexer
         {
             if (depth > 16) return input;
             var output = new List<Token>(input.Count);
+            int spliceAt = -1; // output.Count right after the last expansion (only its last token may take following arguments)
             var arr = input.ToArray();
             for (int p = 0; p < arr.Length; p++)
             {
+                if (output.Count > 0 && arr[p].Is('(') && output[output.Count - 1].Kind == TK.Ident && !hide.Contains(output[output.Count - 1].Value)
+                    && macros.Find(output[output.Count - 1].Value) is MacroDef fm && fm.FunctionLike && fm.Body.Length > 0 && output.Count == spliceAt)
+                {
+                    // rescanning: a function-like macro name produced by the previous expansion takes the arguments that
+                    // follow it in the source (UE_JOIN: UE_APPEND_VA_ARG_COUNT(UE_PRIVATE_JOIN) gives UE_PRIVATE_JOIN0, then "(A, B)")
+                    var rest = new List<Token>(arr.Length - p + 1) { output[output.Count - 1] };
+                    for (int k = p; k < arr.Length; k++) rest.Add(arr[k]);
+                    output.RemoveAt(output.Count - 1);
+                    output.AddRange(ExpandFull(rest, macros, depth + 1, hide));
+                    return output;
+                }
                 var x = arr[p];
                 if (x.Kind == TK.Ident && !hide.Contains(x.Value))
                 {
@@ -280,12 +292,14 @@ namespace UnrealSense.Indexer
                             var rescanned = ExpandFull(body, macros, depth + 1, hide);
                             hide.Remove(x.Value);
                             output.AddRange(rescanned);
+                            spliceAt = output.Count;
                             p = end;
                             continue;
                         }
                     }
                 }
                 output.Add(x);
+                spliceAt = -1;
             }
             return output;
         }
@@ -331,6 +345,7 @@ namespace UnrealSense.Indexer
                         }
                         else output.AddRange(right);
                     }
+                    else if (right.Count == 0 && npi >= 0 && output.Count > 0 && output[output.Count - 1].Is(',')) output.RemoveAt(output.Count - 1); // GNU ", ##__VA_ARGS__"
                     else output.AddRange(right);
                     i++;
                     continue;

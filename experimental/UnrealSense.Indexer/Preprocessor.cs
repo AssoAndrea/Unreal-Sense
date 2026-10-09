@@ -12,6 +12,7 @@ namespace UnrealSense.Indexer
         public bool Variadic;
         public Token[] Body = Array.Empty<Token>();   // Number tokens: Value = parsed integer (clamped)
         public bool Ambiguous;                        // defined differently in different files
+        public bool IsDefault;                        // inside "#ifndef NAME" / "#if !defined(NAME)": a fallback another header may override
         public string BodyKey;                        // for comparing definitions
         public int Kind = -1;                         // cached MacroKind (see DeclParser)
 
@@ -61,6 +62,7 @@ namespace UnrealSense.Indexer
         public List<string> Includes;
         public List<MacroDef> Defines;                             // active #defines (for the global table)
         public HashSet<int> Undefs;
+        public HashSet<int> UnknownInConditions;                   // identifiers an #if/#ifdef could not find (phase 0 only)
         public List<(string Include, Dictionary<int, MacroDef> Macros)> IncludeContexts;                                // names #undef'd in this file (file-scoped helper macros)
         public int Lines;
     }
@@ -89,22 +91,72 @@ namespace UnrealSense.Indexer
 
         public MacroDef FindMacro(int name) => Find(name);
 
+        HashSet<int> unknown;
+
+        /// <summary>Find for a condition: phase 0 remembers what was missing (the global table may define it later).</summary>
+        MacroDef FindNoting(int name)
+        {
+            var m = Find(name);
+            if (m == null) unknown?.Add(name);
+            return m;
+        }
+
+        static int NotDefinedName(List<Token> dir)
+        {
+            // #if !defined(NAME)  /  #if !defined NAME
+            if (dir.Count < 4 || !dir[1].Is('!') || !dir[2].IsId(K.Defined)) return -1;
+            if (dir[3].Kind == TK.Ident) return dir.Count == 4 ? dir[3].Value : -1;
+            return dir.Count == 6 && dir[3].Is('(') && dir[4].Kind == TK.Ident && dir[5].Is(')') ? dir[4].Value : -1;
+        }
+
+        static readonly int PlatformHeader = Names.Intern("COMPILED_PLATFORM_HEADER"), PlatformHeaderGenerated = Names.Intern("COMPILED_PLATFORM_HEADER_GENERATED"),
+            PlatformHeaderWithPrefix = Names.Intern("COMPILED_PLATFORM_HEADER_WITH_PREFIX"), OverridePlatformHeaderName = Names.Intern("OVERRIDE_PLATFORM_HEADER_NAME"),
+            UbtCompiledPlatform = Names.Intern("UBT_COMPILED_PLATFORM");
+
+        /// <summary>
+        /// Unreal's "uber-platform" headers include through macros (<c>#include COMPILED_PLATFORM_HEADER(PlatformMath.h)</c> →
+        /// "Windows/WindowsPlatformMath.h"); without them FPlatformMath, FPlatformAtomics... are missing from the include closure.
+        /// Expanded here like PreprocessorHelpers.h does for a non-extension platform.
+        /// </summary>
+        string PlatformInclude(List<Token> dir, byte[] src)
+        {
+            int m = dir[1].Value;
+            if ((m != PlatformHeader && m != PlatformHeaderGenerated && m != PlatformHeaderWithPrefix) || dir.Count < 4 || !dir[2].Is('(')) return null;
+            var args = new List<string>();
+            var sb = new StringBuilder();
+            for (int i = 3; i < dir.Count; i++)
+            {
+                if (dir[i].Is(')') || dir[i].Is(',')) { args.Add(sb.ToString()); sb.Clear(); if (dir[i].Is(')')) break; continue; }
+                sb.Append(Encoding.UTF8.GetString(src, dir[i].Pos, dir[i].Len));
+            }
+            var def = Find(OverridePlatformHeaderName) ?? Find(UbtCompiledPlatform);
+            string platform = def != null && def.Body.Length == 1 && def.Body[0].Kind == TK.Ident ? Names.Get(def.Body[0].Value) : "Windows";
+            if (platform == "Win64") platform = "Windows";
+            if (m == PlatformHeader && args.Count == 1) return platform + "/" + platform + args[0];
+            if (m == PlatformHeaderGenerated && args.Count == 1) return platform + args[0];
+            if (m == PlatformHeaderWithPrefix && args.Count == 2) return args[0] + "/" + platform + "/" + platform + args[1];
+            return null;
+        }
+
         static readonly int D_if = Names.Intern("if"), D_ifdef = Names.Intern("ifdef"), D_ifndef = Names.Intern("ifndef"), D_elif = Names.Intern("elif"),
             D_elifdef = Names.Intern("elifdef"), D_elifndef = Names.Intern("elifndef"), D_else = Names.Intern("else"), D_endif = Names.Intern("endif"),
             D_define = Names.Intern("define"), D_undef = Names.Intern("undef"), D_include = Names.Intern("include"), D_include_next = Names.Intern("include_next"),
             D_import = Names.Intern("import");
 
-        public PreprocessedFile Run(byte[] src, bool wantTokens, bool wantIncludes, Dictionary<int, MacroDef> context = null)
+        /// <param name="buffer">reused token array (grown as needed; the result may be a new array)</param>
+        public PreprocessedFile Run(byte[] src, bool wantTokens, bool wantIncludes, Dictionary<int, MacroDef> context = null, Token[] buffer = null)
         {
             local = context != null ? new Dictionary<int, MacroDef>(context) : null;
             var result = new PreprocessedFile();
-            var toks = wantTokens ? new Token[Math.Max(64, src.Length / 5)] : null;
+            var toks = wantTokens ? buffer ?? new Token[Math.Max(64, src.Length / 5)] : null;
             int count = 0;
             int start = 0;
             if (src.Length >= 3 && src[0] == 0xEF && src[1] == 0xBB && src[2] == 0xBF) start = 3;
             var lx = new Lexer(src, start, src.Length);
             // conditional stack: state 0 = active, 1 = looking for a true branch, 2 = done (a branch was taken), 3 = parent inactive
             var stack = new List<byte>();
+            var guards = new List<int>(); // per conditional: NAME of "#ifndef NAME" / "#if !defined(NAME)" while in its first branch, else -1
+            unknown = collectDefines ? new HashSet<int>() : null;
             bool active = true;
             var dir = new List<Token>(32);
             if (wantIncludes) result.Includes = new List<string>();
@@ -125,25 +177,28 @@ namespace UnrealSense.Indexer
                     int d = dir[0].Value;
                     if (d == D_if || d == D_ifdef || d == D_ifndef)
                     {
-                        if (!active) { stack.Add(3); continue; }
-                        bool v = d == D_if ? Eval(dir, 1, src) : (dir.Count > 1 && dir[1].Kind == TK.Ident && Find(dir[1].Value) != null) == (d == D_ifdef);
+                        if (!active) { stack.Add(3); guards.Add(-1); continue; }
+                        bool v = d == D_if ? Eval(dir, 1, src) : (dir.Count > 1 && dir[1].Kind == TK.Ident && FindNoting(dir[1].Value) != null) == (d == D_ifdef);
                         stack.Add(v ? (byte)0 : (byte)1);
+                        guards.Add(d == D_ifndef && dir.Count > 1 && dir[1].Kind == TK.Ident ? dir[1].Value : d == D_if ? NotDefinedName(dir) : -1);
                         active = v;
                     }
                     else if (d == D_elif || d == D_elifdef || d == D_elifndef)
                     {
                         if (stack.Count == 0) continue;
+                        guards[guards.Count - 1] = -1;
                         byte st = stack[stack.Count - 1];
                         if (st == 0) { stack[stack.Count - 1] = 2; active = false; }
                         else if (st == 1)
                         {
-                            bool v = d == D_elif ? Eval(dir, 1, src) : (dir.Count > 1 && dir[1].Kind == TK.Ident && Find(dir[1].Value) != null) == (d == D_elifdef);
+                            bool v = d == D_elif ? Eval(dir, 1, src) : (dir.Count > 1 && dir[1].Kind == TK.Ident && FindNoting(dir[1].Value) != null) == (d == D_elifdef);
                             if (v) { stack[stack.Count - 1] = 0; active = true; }
                         }
                     }
                     else if (d == D_else)
                     {
                         if (stack.Count == 0) continue;
+                        guards[guards.Count - 1] = -1;
                         byte st = stack[stack.Count - 1];
                         if (st == 0) { stack[stack.Count - 1] = 2; active = false; }
                         else if (st == 1) { stack[stack.Count - 1] = 0; active = true; }
@@ -152,6 +207,7 @@ namespace UnrealSense.Indexer
                     {
                         if (stack.Count == 0) continue;
                         stack.RemoveAt(stack.Count - 1);
+                        guards.RemoveAt(guards.Count - 1);
                         active = stack.Count == 0 || stack[stack.Count - 1] == 0;
                     }
                     else if (!active) { }
@@ -160,6 +216,7 @@ namespace UnrealSense.Indexer
                         var def = ParseDefine(dir, src);
                         if (def != null)
                         {
+                            def.IsDefault = guards.Contains(def.Name);
                             (local ??= new Dictionary<int, MacroDef>())[def.Name] = def;
                             result.Defines?.Add(def);
                         }
@@ -182,6 +239,11 @@ namespace UnrealSense.Indexer
                             while (e > 1 && !dir[e].Is('>')) e--;
                             if (e > 1) { var s = Encoding.UTF8.GetString(src, dir[2].Pos, dir[e].Pos - dir[2].Pos); result.Includes.Add(s); Snapshot(result, s); }
                         }
+                        else if (dir[1].Kind == TK.Ident)
+                        {
+                            var s = PlatformInclude(dir, src);
+                            if (s != null) { result.Includes.Add(s); Snapshot(result, s); }
+                        }
                     }
                     continue;
                 }
@@ -195,6 +257,7 @@ namespace UnrealSense.Indexer
             result.Tokens = toks;
             result.Count = count;
             result.LocalMacros = local;
+            result.UnknownInConditions = unknown;
             result.Lines = lx.Line;
             return result;
         }
@@ -317,14 +380,14 @@ namespace UnrealSense.Indexer
                     if (j < input.Count && input[j].Is('(')) { paren = true; j++; }
                     bool v;
                     if (t.Value == K.Defined)
-                        v = j < input.Count && input[j].Kind == TK.Ident && Find(input[j].Value) != null;
+                        v = j < input.Count && input[j].Kind == TK.Ident && FindNoting(input[j].Value) != null;
                     else v = true;
                     if (paren) { int d = 0; for (; j < input.Count; j++) { if (input[j].Is('(')) d++; else if (input[j].Is(')')) { if (d == 0) break; d--; } } }
                     i = j;
                     output.Add(new Token { Kind = TK.Number, Value = v ? 1 : 0 });
                     continue;
                 }
-                var m = depth < 24 ? Find(t.Value) : null;
+                var m = depth < 24 ? FindNoting(t.Value) : null;
                 if (m == null || m.Ambiguous && !m.FunctionLike && m.Body.Length == 1 && m.Body[0].Kind == TK.Number && false)
                 {
                     if (t.Value == K.True) output.Add(new Token { Kind = TK.Number, Value = 1 });

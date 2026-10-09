@@ -20,6 +20,8 @@ namespace UnrealSense.Indexer
         public static readonly int CtorKey = Names.Intern("(ctor)");
         static readonly int SuperName = K.Super, ThisClassName = K.ThisClass;
 
+        readonly List<Symbol> pendingSpecializations = new List<Symbol>();
+
         public SymbolTable() { All.Add(Root); }
 
         Symbol New(SymKind kind, int name, Symbol parent, int file, Decl d)
@@ -66,6 +68,12 @@ namespace UnrealSense.Indexer
                     f.Map[i] = Register(d, parent, f.FileId);
                 }
             }
+            foreach (var sp in pendingSpecializations)
+            {
+                var primary = FindMember<Symbol>(sp.Parent, sp.Name, x => x.IsClassLike && (x.Flags & DeclFlags.Specialization) == 0);
+                if (primary != null && primary != sp) (primary.Specializations ??= new List<Symbol>()).Add(sp);
+            }
+            pendingSpecializations.Clear();
             // UCLASS/USTRUCT: Super, ThisClass, StaticClass()/StaticStruct()
             int count = All.Count;
             for (int i = 0; i < count; i++)
@@ -170,10 +178,8 @@ namespace UnrealSense.Indexer
                         SetTemplateParams(sp, d.TemplateParams);
                         if (d.Name == 0 && parent.IsClassLike || d.Name == 0 && parent.Kind == SymKind.Namespace && false)
                             (parent.AnonymousChildren ??= new List<Symbol>()).Add(sp);
-                        if (d.Name != 0)
-                        {
-                            // keep specializations reachable for "find symbol at position" but not by name lookup
-                        }
+                        // not reachable by name lookup; linked to the primary template after the merge
+                        if (d.Name != 0) pendingSpecializations.Add(sp);
                         return sp;
                     }
                     var c = FindMember<Symbol>(parent, d.Name, x => x.IsClassLike);
@@ -459,12 +465,20 @@ namespace UnrealSense.Indexer
             try
             {
                 var arr = new TypeInfo[cls.BaseExprs.Length];
+                List<TypeInfo> dependent = null;
                 for (int i = 0; i < arr.Length; i++)
                 {
                     // bases are looked up from the enclosing scope, with the class's own template parameters visible
                     arr[i] = ResolveTypeExpr(cls.BaseExprs[i], cls, null, null, 0, baseOf: cls);
-                    if (arr[i]?.Sym != null && !arr[i].Sym.IsClassLike) arr[i] = null;
+                    if (arr[i]?.Sym != null && !arr[i].Sym.IsClassLike)
+                    {
+                        // kept apart: resolvable only through an instance's template arguments (member lookup substitutes them)
+                        if (arr[i].Sym.Kind == SymKind.TemplateParam && arr[i].Sym.Parent == cls)
+                            (dependent ??= new List<TypeInfo>()).Add(arr[i]);
+                        arr[i] = null;
+                    }
                 }
+                if (dependent != null) cls.DependentBases = dependent.ToArray();
                 cls.ResolvedBases = arr;
                 return arr;
             }

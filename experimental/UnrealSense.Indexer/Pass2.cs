@@ -172,7 +172,12 @@ namespace UnrealSense.Indexer
                         cur = i == 0 ? (d.Type.Global ? S.LookupIn(S.Root, part.Name) : S.LookupUnqualified(part.Name, scope, lex)) : (sc != null ? S.LookupIn(sc, part.Name) : null);
                         if (cur == null) break;
                         if (cur is Symbol cs) Emit(cs, part.Tok, RefKind.Type);
-                        else if (cur is List<Symbol> l && l.Count > 0) Emit(l[0], part.Tok, RefKind.Type);
+                        else if (cur is List<Symbol> l && l.Count > 0)
+                        {
+                            // "using Base::Draw;" brings in every overload: each one is referenced (clangd: one ref per target)
+                            if (i == d.Type.Parts.Length - 1) foreach (var x in l) { emitted[part.Tok] = 0; Emit(x, part.Tok, RefKind.Type); }
+                            else Emit(l[0], part.Tok, RefKind.Type);
+                        }
                         sc = PickScopeSym(cur);
                         if (sc != null && sc.Kind == SymKind.Typedef) sc = S.ExpandAlias(sc, null, 0)?.Sym;
                     }
@@ -216,21 +221,49 @@ namespace UnrealSense.Indexer
             // references at the macro location. Types named anywhere in the expansion are emitted here.
             if (ctx.Sym == null || !ctx.Sym.IsClassLike) return;
             var idents = GeneratedBodyIdents?.Invoke(T[tok].Line);
-            if (idents != null)
-            {
-                foreach (var id in idents)
-                {
-                    var r = S.LookupUnqualified(id, ctx.Sym, lex, true);
-                    var sym = r as Symbol ?? (r is List<Symbol> l ? l.FirstOrDefault(x => x.IsClassLike || x.Kind == SymKind.Enum) : null);
-                    if (sym == null || !(sym.IsClassLike || sym.Kind == SymKind.Enum)) continue;
-                    emitted[tok] = 0;
-                    Emit(sym, tok, RefKind.Type);
-                }
-                return;
-            }
+            if (idents != null) { EmitTypesNamed(tok, ctx, idents); return; }
             if (ctx.Sym.Kind == SymKind.Class) Emit(ctx.Sym, tok, RefKind.Type);
             var bases = S.GetBases(ctx.Sym);
             if (bases != null && bases.Length > 0 && bases[0]?.Sym != null) { emitted[tok] = 0; Emit(bases[0].Sym, tok, RefKind.Type); }
+        }
+
+        /// <summary>Types named in a macro expansion are referenced at the macro name (clangd reports expansion references there).</summary>
+        void EmitTypesNamed(int tok, ScopeCtx ctx, List<int> idents)
+        {
+            foreach (var id in idents)
+            {
+                var r = S.LookupUnqualified(id, ctx.Sym, lex, true);
+                var sym = r as Symbol ?? (r is List<Symbol> l ? l.FirstOrDefault(x => x.IsClassLike || x.Kind == SymKind.Enum) : null);
+                if (sym == null || !(sym.IsClassLike || sym.Kind == SymKind.Enum)) continue;
+                emitted[tok] = 0;
+                Emit(sym, tok, RefKind.Type);
+            }
+        }
+
+        /// <summary>
+        /// A function-like macro invoked in a class body that declares members (HIDE_ACTOR_TRANSFORM_FUNCTIONS(), SLATE_ARGUMENT...):
+        /// like GENERATED_BODY, the types its body names are referenced at the macro name. The arguments are resolved as code.
+        /// </summary>
+        public void OnClassBodyMacro(int tok, ScopeCtx ctx)
+        {
+            if (ctx.Sym == null || !ctx.Sym.IsClassLike || T[tok].Kind != TK.Ident) return;
+            var m = Parser.Macros.Find(T[tok].Value);
+            if (m == null || m.Body.Length == 0) return;
+            var idents = new List<int>();
+            var seen = new HashSet<int>();
+            void Walk(MacroDef md, int depth)
+            {
+                if (depth > 8) return;
+                foreach (var t in md.Body)
+                {
+                    if (t.Kind != TK.Ident || Array.IndexOf(md.Params, t.Value) >= 0 || !seen.Add(t.Value)) continue;
+                    var sub = Parser.Macros.Find(t.Value);
+                    if (sub != null) { Walk(sub, depth + 1); continue; }
+                    idents.Add(t.Value);
+                }
+            }
+            Walk(m, 0);
+            EmitTypesNamed(tok, ctx, idents);
         }
 
         public void OnNamespaceAlias(int nameTok, TypeExpr target, ScopeCtx ctx) { }
@@ -349,7 +382,7 @@ namespace UnrealSense.Indexer
                     if (te?.Parts != null && te.Parts.Length == 1 && te.Parts[0].Args == null && thisClass != null)
                     {
                         // member or base
-                        var hit = LookupMember(thisClass, thisType?.Args, te.Parts[0].Name, 0);
+                        var hit = LookupMember(thisClass, thisType?.Args, te.Parts[0].Name, 0, false);
                         var m = First(hit.Members);
                         if (m != null && m.Kind == SymKind.Variable) Emit(m, te.Parts[0].Tok, RefKind.Member);
                         else S.ResolveTypeExpr(te, scopeStart, lex, EmitTypeCb, 0);
@@ -428,7 +461,7 @@ namespace UnrealSense.Indexer
             }
             if (thisClass != null)
             {
-                var hit = LookupMember(thisClass, thisType?.Args, name, 0);
+                var hit = LookupMember(thisClass, thisType?.Args, name, 0, false);
                 if (hit.Members != null) { lastHit = hit; return hit.Members; }
             }
             lastHit = default;
@@ -437,13 +470,16 @@ namespace UnrealSense.Indexer
 
         MemberHit lastHit;
 
-        MemberHit LookupMember(Symbol cls, TypeInfo[] args, int name, int depth)
+        /// <param name="specializations">also search the specializations of a class template when its primary lacks the
+        /// member (TDelegate&lt;Sig&gt;, TTupleBaseElement&lt;T, 0, 2&gt;::Key). Off for the implicit-this lookup of every
+        /// unqualified name: there the walk made pass 2 twice as slow for no gain.</param>
+        MemberHit LookupMember(Symbol cls, TypeInfo[] args, int name, int depth, bool specializations = true)
         {
             if (cls == null || depth > 20) return default;
             if (cls.Kind == SymKind.Typedef)
             {
                 var t = S.ExpandAlias(cls, args, depth + 1);
-                return t?.Sym != null && t.Sym != cls ? LookupMember(t.Sym, t.Args, name, depth + 1) : default;
+                return t?.Sym != null && t.Sym != cls ? LookupMember(t.Sym, t.Args, name, depth + 1, specializations) : default;
             }
             if (cls.IsClassLike && name == cls.Name) return new MemberHit { Members = cls, Owner = cls.Parent, OwnerArgs = null };
             var m = cls.GetMember(name);
@@ -455,7 +491,7 @@ namespace UnrealSense.Indexer
             if (cls.AnonymousChildren != null)
                 foreach (var a in cls.AnonymousChildren)
                 {
-                    var h = LookupMember(a, null, name, depth + 1);
+                    var h = LookupMember(a, null, name, depth + 1, specializations);
                     if (h.Members != null) return h;
                 }
             if (cls.IsClassLike)
@@ -467,7 +503,23 @@ namespace UnrealSense.Indexer
                         if (b?.Sym == null || b.Sym == cls) continue;
                         var bargs = b.Args;
                         if (bargs != null && args != null) bargs = Array.ConvertAll(bargs, x => SymbolTable.Subst(x, cls, args));
-                        var h = LookupMember(b.Sym, bargs, name, depth + 1);
+                        var h = LookupMember(b.Sym, bargs, name, depth + 1, specializations);
+                        if (h.Members != null) return h;
+                    }
+                // the primary template lacks the member (only declared, a static_assert body as TDelegate<Sig>, or the member
+                // lives in a partial specialization): the specializations are the candidates
+                if (cls.Specializations != null && specializations)
+                    foreach (var sp in cls.Specializations)
+                    {
+                        var h = LookupMember(sp, null, name, depth + 1, true);
+                        if (h.Members != null) return h;
+                    }
+                if (cls.DependentBases != null && args != null)
+                    foreach (var db in cls.DependentBases)
+                    {
+                        var b = SymbolTable.Subst(db, cls, args);
+                        if (b?.Sym == null || b == db || !(b.Sym.IsClassLike || b.Sym.Kind == SymKind.Typedef)) continue;
+                        var h = LookupMember(b.Sym, b.Args, name, depth + 1, specializations);
                         if (h.Members != null) return h;
                     }
             }
@@ -940,7 +992,7 @@ namespace UnrealSense.Indexer
         {
             if (te.Parts != null && te.Parts.Length == 1 && thisClass != null)
             {
-                var hit = LookupMember(thisClass, thisType?.Args, te.Parts[0].Name, 0);
+                var hit = LookupMember(thisClass, thisType?.Args, te.Parts[0].Name, 0, false);
                 var m = First(hit.Members);
                 if (m != null)
                 {
@@ -2025,11 +2077,14 @@ namespace UnrealSense.Indexer
                         }
                     if (ret != null) ret = SymbolTable.Subst(ret, f, targs);
                     if (ret != null && ContainsParam(ret, f)) ret = null;
-                    if (ret == null && callee.TArgs != null && callee.TArgs.Length > 0 && callee.TArgs[0]?.Sym != null)
+                    // UE 5.8 casts return TCopyQualifiersFromTo_T<From, To>*: an alias that does not reduce to a class here
+                    if ((ret == null || ret.Sym == null || !ret.Sym.IsClassLike) && callee.TArgs != null && callee.TArgs.Length > 0 && callee.TArgs[0]?.Sym != null)
                     {
                         int fname = f.Name;
                         if (castLike.Contains(fname)) ret = callee.TArgs[0].With(1, false, callee.TArgs[0].Const);
                         else if (fname == GetDefaultName) ret = callee.TArgs[0].With(1, false, true);
+                        else if (ret != null && ret.Sym == null) { }
+                        else if (ret != null && !ret.Sym.IsClassLike && ret.Sym.Kind != SymKind.Enum) ret = null;
                     }
                 }
                 if (ret != null && ret.Sym != null && ret.Sym.Kind == SymKind.TemplateParam) ret = null;

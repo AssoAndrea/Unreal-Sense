@@ -9,6 +9,8 @@
     <RootNamespace>UnrealSense.IndexerCli</RootNamespace>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <!-- DATAS: server GC that sizes its heaps to the live data. Engine build: peak 8.4 GB -> 4.6 GB, same time. -->
+    <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
     <TieredPGO>true</TieredPGO>
   </PropertyGroup>
 

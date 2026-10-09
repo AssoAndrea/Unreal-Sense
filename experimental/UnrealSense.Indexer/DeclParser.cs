@@ -27,6 +27,7 @@ namespace UnrealSense.Indexer
         void OnType(TypeExpr t, ScopeCtx ctx);
         void OnUsingDirective(TypeExpr ns, ScopeCtx ctx);
         void OnGeneratedBody(int tok, ScopeCtx ctx);
+        void OnClassBodyMacro(int tok, ScopeCtx ctx);
         void OnNamespaceAlias(int nameTok, TypeExpr target, ScopeCtx ctx);
     }
 
@@ -813,6 +814,7 @@ namespace UnrealSense.Indexer
             }
             // generic: skip the invocation; resolve arguments loosely; a following '{' is a body (macro-generated function header)
             if (sink != null && close > open + 1) sink.OnSoup(open + 1, close, ctx);
+            if (sink != null && ctx.IsClass) sink.OnClassBodyMacro(open - 1, ctx);
             p = close + 1;
             if (IsP(p, '{') && Match[p] > p && !ctx.IsClass)
             {
