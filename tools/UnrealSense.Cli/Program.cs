@@ -15,8 +15,6 @@ namespace UnrealSense.Cli
     {
         static int Main(string[] args)
         {
-            var cacheOverride = Environment.GetEnvironmentVariable("UNREALSENSE_CACHE");
-            if (!string.IsNullOrEmpty(cacheOverride)) Clang.CompileDatabase.CacheRoot = cacheOverride;
             if (args.Length < 2)
             {
                 Console.WriteLine("usage: unrealsense dump <file.uasset>");
@@ -31,24 +29,13 @@ namespace UnrealSense.Cli
                 case "analyze": return Analyze(args[1]);
                 case "goto": return GoTo(args[1], args.Skip(2).ToArray());
                 case "decls": return Decls(args[1]);
-                case "clangdb":
+                case "compiledb":
                 {
+                    // compiledb <dir|uproject>: the compile database the own indexer reads (UBT runs only when it is out of date)
                     var project = UnrealProject.Load(UnrealProject.FindUProject(args[1]));
-                    Console.WriteLine(Clang.CompileDatabase.Generate(project, Console.WriteLine));
+                    Console.WriteLine(CompileDatabase.Ensure(project, Console.WriteLine));
                     return 0;
                 }
-                case "unity":
-                {
-                    // unity <compile_commands.files.json> <outDir> <maxFiles> [maxKB]: unity database with a chosen group size
-                    Directory.CreateDirectory(args[2]);
-                    var maps = new Clang.HeaderMaps(Path.Combine(args[2], Clang.HeaderMaps.FolderName));
-                    var stats = Clang.CompileDatabase.BuildUnity(args[1], Path.Combine(args[2], "compile_commands.json"), Path.Combine(args[2], "unity"), null,
-                        maxFiles: int.Parse(args[3]), maxBytes: (args.Length > 4 ? long.Parse(args[4]) : 1024) * 1024, headerMaps: maps);
-                    maps.SaveManifest();
-                    Console.WriteLine(stats.ToString().Split('\n')[0]);
-                    return 0;
-                }
-                case "simengine": return SimEngine(args[1], args[2], args[3], args.Skip(4).ToArray());
                 case "grep":
                 {
                     // grep <word> <root>...: parallel whole-word search over .h/.cpp/.inl (no index), timed twice (cold/warm cache).
@@ -86,15 +73,11 @@ namespace UnrealSense.Cli
                     }
                     return 0;
                 }
-                case "sampledb": return SampleDb(args[1], args[2], int.Parse(args[3]), args.Length > 4 ? int.Parse(args[4]) : 0);
-                case "indexbench": return IndexBench(args[1], args.Length > 2 ? int.Parse(args[2]) : 1, args.Length > 3 && args[3] == "keep");
                 case "resanitize":
                 {
                     var project = UnrealProject.Load(UnrealProject.FindUProject(args[1]));
-                    Clang.CompileDatabase.Resanitize(project, args.Length > 2 ? args[2] : null, Console.WriteLine);
-                    return 0;
+                    return CompileDatabase.Resanitize(project, Console.WriteLine) ? 0 : 1;
                 }
-                case "opentest": return OpenTest(args[1], args.Skip(2).ToArray());
                 case "editor-enable":
                 {
                     var error = Remote.RemoteExecutionSetup.Enable(UnrealProject.FindUProject(args[1]));
@@ -104,7 +87,6 @@ namespace UnrealSense.Cli
                 case "editor-open": return EditorOpen(args[1], args.Length > 2 ? args[2] : null);
                 case "classes": return Classes(args[1], args.Length > 2 ? args[2] : null);
                 case "new-class": return NewClass(args[1], args.Skip(2).ToArray());
-                case "refs": return Refs(args[1], args[2], int.Parse(args[3]), int.Parse(args[4]), args.Length > 5 ? args[5] : null, args.Length > 6 ? int.Parse(args[6]) : 0);
                 default:
                     Console.Error.WriteLine($"unknown command '{args[0]}'");
                     return 1;
@@ -323,207 +305,6 @@ namespace UnrealSense.Cli
                     }
                 }
             }
-            return 0;
-        }
-
-        /// <summary>refs &lt;project&gt; &lt;file&gt; &lt;line 1-based&gt; &lt;column 1-based&gt;: semantic references via clangd.</summary>
-        /// <summary>
-        /// simengine &lt;project files.json&gt; &lt;Engine dir&gt; &lt;out files.json&gt; &lt;module dir&gt;...: builds an
-        /// engine-scale benchmark database on an installed (precompiled) engine, whose own sources UBT never lists.
-        /// Each engine source gets the command of a project source with its module's Definitions.h and include folders
-        /// (Public/Private/Classes/Internal + UHT output). Not every file compiles cleanly, but the amount of work is
-        /// representative of indexing a source-built engine.
-        /// </summary>
-        static int SimEngine(string projectFiles, string engineDir, string output, string[] moduleDirs)
-        {
-            var template = Newtonsoft.Json.Linq.JArray.Parse(File.ReadAllText(projectFiles)).OfType<Newtonsoft.Json.Linq.JObject>()
-                .First(e => ((string)e["file"]).EndsWith(".cpp") && !((string)e["file"]).Contains(".gen."));
-            var args = template["arguments"].Select(a => (string)a).ToList();
-            int source = args.FindIndex(a => !a.StartsWith("/") && !a.StartsWith("-") && !a.StartsWith("@") && a.EndsWith(".cpp", StringComparison.OrdinalIgnoreCase));
-            int definitions = args.FindIndex(a => a.StartsWith("/FI") && a.EndsWith("Definitions.h", StringComparison.OrdinalIgnoreCase));
-            var result = new Newtonsoft.Json.Linq.JArray();
-            foreach (var moduleDir in moduleDirs)
-            {
-                var full = Path.GetFullPath(moduleDir);
-                var name = Path.GetFileName(full.TrimEnd('\\'));
-                var defs = Path.Combine(engineDir, "Intermediate", "Build", "Win64", "x64", "UnrealEditor", "Development", name, "Definitions.h");
-                if (!File.Exists(defs)) { Console.WriteLine($"skip {name}: no Definitions.h"); continue; }
-                var extra = new[] { "Public", "Private", "Classes", "Internal" }.Select(d => Path.Combine(full, d)).Where(Directory.Exists)
-                    .Concat(new[] { Path.Combine(engineDir, "Intermediate", "Build", "Win64", "UnrealEditor", "Inc", name, "UHT"), Path.Combine(engineDir, "Intermediate", "Build", "Win64", "UnrealEditor", "Inc", name) })
-                    .Where(Directory.Exists).Select(d => "/I" + d.Replace('\\', '/')).ToList();
-                int count = 0;
-                foreach (var cpp in Directory.EnumerateFiles(full, "*.cpp", SearchOption.AllDirectories))
-                {
-                    if (cpp.IndexOf("\\Tests\\", StringComparison.OrdinalIgnoreCase) >= 0 || cpp.IndexOf("\\Mac\\", StringComparison.OrdinalIgnoreCase) >= 0
-                        || cpp.IndexOf("\\Linux\\", StringComparison.OrdinalIgnoreCase) >= 0 || cpp.IndexOf("\\Android\\", StringComparison.OrdinalIgnoreCase) >= 0
-                        || cpp.IndexOf("\\IOS\\", StringComparison.OrdinalIgnoreCase) >= 0 || cpp.IndexOf("\\Apple\\", StringComparison.OrdinalIgnoreCase) >= 0) continue;
-                    var a = args.ToList();
-                    a[source] = cpp.Replace('\\', '/');
-                    if (definitions >= 0) a[definitions] = "/FI" + defs.Replace('\\', '/');
-                    a.AddRange(extra);
-                    result.Add(new Newtonsoft.Json.Linq.JObject { ["directory"] = template["directory"], ["file"] = cpp.Replace('\\', '/'), ["arguments"] = new Newtonsoft.Json.Linq.JArray(a) });
-                    count++;
-                }
-                Console.WriteLine($"{name}: {count} sources");
-            }
-            File.WriteAllText(output, result.ToString(Newtonsoft.Json.Formatting.None));
-            Console.WriteLine($"{result.Count} engine sources -> {output}");
-            return 0;
-        }
-
-        /// <summary>
-        /// sampledb &lt;compile_commands.json&gt; &lt;outDir&gt; &lt;count&gt; [seed]: writes a database with
-        /// <c>count</c> entries picked evenly (or randomly with a seed) from a full one, for <c>indexbench</c>.
-        /// </summary>
-        static int SampleDb(string source, string outDir, int count, int seed)
-        {
-            var entries = Newtonsoft.Json.Linq.JArray.Parse(File.ReadAllText(source));
-            var rng = new Random(seed);
-            var picked = seed != 0
-                ? entries.OrderBy(_ => rng.Next()).Take(count).ToList()
-                : Enumerable.Range(0, Math.Min(count, entries.Count)).Select(i => entries[(int)((long)i * entries.Count / Math.Min(count, entries.Count))]).ToList();
-            Directory.CreateDirectory(outDir);
-            File.WriteAllText(Path.Combine(outDir, "compile_commands.json"), new Newtonsoft.Json.Linq.JArray(picked).ToString());
-            Console.WriteLine($"{picked.Count} of {entries.Count} entries -> {outDir}");
-            return 0;
-        }
-
-        /// <summary>
-        /// indexbench &lt;compile-commands-dir&gt; [jobs]: indexes the database from scratch (delete its .cache first)
-        /// and prints when clangd's background index went quiet, with the peak clangd memory.
-        /// </summary>
-        static int IndexBench(string dbDir, int jobs, bool keepCache = false)
-        {
-            var cache = Path.Combine(dbDir, ".cache");
-            if (!keepCache && Directory.Exists(cache)) Directory.Delete(cache, recursive: true);
-            using var clangd = new Clang.ClangdClient();
-            var clock = Stopwatch.StartNew();
-            double lastEnd = 0;
-            long peak = 0;
-            int units = Newtonsoft.Json.Linq.JArray.Parse(File.ReadAllText(Path.Combine(dbDir, "compile_commands.json"))).Count;
-            clangd.Log += m =>
-            {
-                if (m.StartsWith("progress end")) lastEnd = clock.Elapsed.TotalSeconds;
-                if (m.StartsWith("progress report")) Console.WriteLine($"[{clock.Elapsed.TotalSeconds,7:F1}s] {m.Substring(16)}");
-            };
-            clangd.StartAsync(Clang.ClangdClient.FindClangd(), dbDir, dbDir, jobs: jobs, lowPriority: false).GetAwaiter().GetResult();
-            var first = (string)Newtonsoft.Json.Linq.JArray.Parse(File.ReadAllText(Path.Combine(dbDir, "compile_commands.json")))[0]["file"];
-            clangd.SyncDocumentAsync(first, File.ReadAllText(first)).GetAwaiter().GetResult();
-            clangd.CloseDocumentAsync(first).GetAwaiter().GetResult();
-
-            // clangd reports several begin/end cycles: done after 30 s without indexing.
-            var quiet = Stopwatch.StartNew();
-            var cpuAtEnd = TimeSpan.Zero;
-            ulong cyclesAtEnd = 0;
-            int lastMinute = 0;
-            while (quiet.Elapsed < TimeSpan.FromSeconds(30) && clock.Elapsed < TimeSpan.FromHours(4))
-            {
-                if (clangd.State == Clang.ClangdState.Indexing) { quiet.Restart(); cpuAtEnd = clangd.CpuTime; cyclesAtEnd = clangd.CpuCycles; }
-                peak = Math.Max(peak, clangd.MemoryBytes);
-                if ((int)clock.Elapsed.TotalMinutes > lastMinute)
-                {
-                    lastMinute = (int)clock.Elapsed.TotalMinutes;
-                    Console.WriteLine($"[{clock.Elapsed.TotalSeconds,7:F1}s] clangd {clangd.MemoryBytes / (1024.0 * 1024 * 1024):F1} GB, cpu {clangd.CpuCycles / TscHz():F0}s (cycles)");
-                }
-                System.Threading.Thread.Sleep(250);
-            }
-            // CPU use: how many cores clangd kept busy on average while indexing (ideal = threads).
-            double busyCores = lastEnd > 0 ? cpuAtEnd.TotalSeconds / lastEnd : 0;
-            double cycleSeconds = cyclesAtEnd / TscHz();
-            Console.WriteLine($"indexed {units} translation units with {clangd.Jobs} threads in {lastEnd:F1}s " +
-                              $"({(lastEnd > 0 ? units * 60 / lastEnd : 0):F1} units/min), CPU {cpuAtEnd.TotalSeconds:F0}s = {busyCores:F1} busy cores on average, " +
-                              $"CPU by cycles {cycleSeconds:F0}s = {(lastEnd > 0 ? cycleSeconds / lastEnd : 0):F1} busy cores, " +
-                              $"peak clangd memory {peak / (1024.0 * 1024 * 1024):F1} GB, {clangd.UnitsWithErrors} unit(s) with compile errors");
-            return 0;
-        }
-
-        static double TscHz() => Clang.ClangdClient.CycleRateHz;
-
-        /// <summary>refs &lt;project&gt; &lt;file&gt; &lt;line&gt; &lt;column&gt; [compile-commands-dir] [jobs]</summary>
-        static int Refs(string projectPath, string file, int line, int column, string dbDirOverride = null, int jobs = 0)
-        {
-            var project = UnrealProject.Load(UnrealProject.FindUProject(projectPath));
-            var dbDir = dbDirOverride ?? Clang.CompileDatabase.GetOutputDirectory(project);
-            if (!File.Exists(Path.Combine(dbDir, "compile_commands.json")))
-                Clang.CompileDatabase.Generate(project, Console.WriteLine);
-
-            using var clangd = new Clang.ClangdClient();
-            var clock = Stopwatch.StartNew();
-            clangd.Log += m => Console.WriteLine($"[{clock.Elapsed.TotalSeconds,6:F1}s] {m}");
-            clangd.Commands = Clang.CompileCommandIndex.Load(Path.Combine(dbDir, Clang.CompileDatabase.FilesVariant));
-            var sw = Stopwatch.StartNew();
-            clangd.StatusChanged += (s, e) =>
-            {
-                if (clangd.State == Clang.ClangdState.Indexing && clangd.IndexPercentage % 25 == 0)
-                    Console.WriteLine($"  [{sw.Elapsed.TotalSeconds:F0}s] indexing {clangd.IndexPercentage}% {clangd.IndexMessage}");
-            };
-            clangd.StartAsync(Clang.ClangdClient.FindClangd(), dbDir, project.ProjectDirectory, jobs: jobs, lowPriority: false).GetAwaiter().GetResult();
-            // Like the extension: open a database entry first so clangd loads the database and starts the background index.
-            var first = (string)Newtonsoft.Json.Linq.JArray.Parse(File.ReadAllText(Path.Combine(dbDir, "compile_commands.json")))[0]["file"];
-            clangd.SyncDocumentAsync(first, File.ReadAllText(first), pushCommand: false).GetAwaiter().GetResult();
-            clangd.CloseDocumentAsync(first).GetAwaiter().GetResult();
-            clangd.SyncDocumentAsync(file, File.ReadAllText(file)).GetAwaiter().GetResult();
-
-            // Wait for the background index to start and finish (persisted: fast on later runs).
-            // clangd reports several begin/end cycles (loading, opened files, the real indexing): wait for 30 s of quiet.
-            var started = Stopwatch.StartNew();
-            var quiet = Stopwatch.StartNew();
-            while (quiet.Elapsed < TimeSpan.FromSeconds(30) && started.Elapsed < TimeSpan.FromMinutes(30))
-            {
-                if (clangd.State == Clang.ClangdState.Indexing) quiet.Restart();
-                System.Threading.Thread.Sleep(250);
-            }
-            Console.WriteLine($"index ready after {sw.Elapsed.TotalSeconds:F1}s (state {clangd.State})");
-
-            sw.Restart();
-            var hover = clangd.HoverAsync(file, line - 1, column - 1).GetAwaiter().GetResult();
-            Console.WriteLine("symbol: " + hover?.Split('\n').FirstOrDefault(l => l.Trim().Length > 0));
-            var refs = clangd.FindReferencesAsync(file, line - 1, column - 1, includeDeclaration: true).GetAwaiter().GetResult();
-            Console.WriteLine($"{refs.Count} references in {sw.ElapsedMilliseconds} ms:");
-            foreach (var r in refs.OrderBy(r => r.FilePath).ThenBy(r => r.Line))
-            {
-                var text = File.ReadLines(r.FilePath).Skip(r.Line).FirstOrDefault()?.Trim();
-                Console.WriteLine($"  {Path.GetFileName(r.FilePath)}:{r.Line + 1}:{r.Column + 1}  {text}");
-            }
-            return 0;
-        }
-
-        /// <summary>
-        /// Does opening documents with their own command (as the extension does) make clangd's background index work?
-        /// Starts clangd on an already indexed database, waits for quiet, opens the files and logs what follows.
-        /// </summary>
-        static int OpenTest(string dbDir, string[] files)
-        {
-            using var clangd = new Clang.ClangdClient();
-            var clock = Stopwatch.StartNew();
-            clangd.Log += m => { if (m.StartsWith("progress")) Console.WriteLine($"[{clock.Elapsed.TotalSeconds,6:F1}s] {m}"); };
-            clangd.Commands = Clang.CompileCommandIndex.Load(Path.Combine(dbDir, Clang.CompileDatabase.FilesVariant));
-            clangd.StartAsync(Clang.ClangdClient.FindClangd(), dbDir, dbDir, jobs: 8, lowPriority: false).GetAwaiter().GetResult();
-            var first = (string)Newtonsoft.Json.Linq.JArray.Parse(File.ReadAllText(Path.Combine(dbDir, "compile_commands.json")))[0]["file"];
-            clangd.SyncDocumentAsync(first, File.ReadAllText(first), pushCommand: false).GetAwaiter().GetResult();
-            clangd.CloseDocumentAsync(first).GetAwaiter().GetResult();
-            void WaitQuiet(int seconds)
-            {
-                var quiet = Stopwatch.StartNew();
-                var started = Stopwatch.StartNew();
-                while (quiet.Elapsed < TimeSpan.FromSeconds(seconds) && started.Elapsed < TimeSpan.FromMinutes(20))
-                {
-                    if (clangd.State == Clang.ClangdState.Indexing) quiet.Restart();
-                    System.Threading.Thread.Sleep(250);
-                }
-            }
-            WaitQuiet(20);
-            Console.WriteLine($"[{clock.Elapsed.TotalSeconds,6:F1}s] quiet; opening {files.Length} file(s) with their own command");
-            foreach (var f in files)
-                clangd.SyncDocumentAsync(f, File.ReadAllText(f)).GetAwaiter().GetResult();
-            foreach (var f in files)
-            {
-                var sw = Stopwatch.StartNew();
-                clangd.HoverAsync(f, 0, 0).GetAwaiter().GetResult();
-                Console.WriteLine($"[{clock.Elapsed.TotalSeconds,6:F1}s] {Path.GetFileName(f)} parsed ({sw.Elapsed.TotalSeconds:F1}s)");
-            }
-            WaitQuiet(30);
-            Console.WriteLine($"[{clock.Elapsed.TotalSeconds,6:F1}s] done; cpu {clangd.CpuTime.TotalSeconds:F0}s");
             return 0;
         }
 

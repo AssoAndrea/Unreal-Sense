@@ -28,16 +28,15 @@ module aliases): check it first when a counter looks wrong.
 ### Experimental, off by default
 
 **Own C++ index** (`Use the own C++ index (experimental)` in the options, category "Find Usages (own index, experimental)"):
-Find Usages from UnrealSense's own C++ indexer, written from scratch (no clangd, no compiler). It runs as a separate process
+Find Usages from UnrealSense's own C++ indexer, written from scratch (no compiler). It runs as a separate process
 (`OwnIndexer\usindex.exe`, shipped in the VSIX with its own .NET runtime), indexes the project and the engine headers it
 includes in a few seconds, keeps the index on disk and updates it incrementally after C++ files are saved (only the changed
-files are read again). With the option on, **Find Usages** appears in the editor's context menu and under Extensions ›
-UnrealSense. `Index the whole engine` also indexes every engine and plugin source file (about 100k files). Log lines start
-with `OwnIndex:`. Uses on an object whose type the indexer cannot infer are counted as "not listed" instead of guessed.
-
-A semantic C++ index built with clangd (exact Find Usages, Go to Symbol/File, Go to Definition) is in the code but
-disabled (`Enable semantic C++ index (experimental)` in the options) and its commands are hidden: on large source-built
-engines the first index takes too long.
+files are read again). It reads each file's include paths and definitions from UnrealBuildTool's compile database, which
+UnrealSense generates on the first start and again when the build rules change or a source file is added (about a minute).
+With the option on, **Find Usages** appears in the editor's context menu and under Extensions › UnrealSense.
+`Index the whole engine` also indexes every engine and plugin source file (about 100k files). Log lines start with
+`OwnIndex:`. Uses on an object whose type the indexer cannot infer are listed apart, under "Uncertain" at the bottom of the
+results, instead of being guessed.
 
 ## Installing and updating
 
@@ -51,17 +50,17 @@ Environment › Extensions › Additional Extension Galleries.
 ```
 src/UnrealSense.Core     netstandard2.0, no VS dependency, unit-tested
   Assets/                .uasset reader (FPackageFileSummary, name/import/export maps) + AssetIndex (cached)
-  Project/               .uproject/.uplugin/.Build.cs model, engine locator, config redirects
+  Project/               .uproject/.uplugin/.Build.cs model, engine locator, config redirects, compile database (UBT)
   Cpp/                   tolerant C++ lexer, reflection header parser, completion context
   Reflection/            specifier catalog (built-in + UHT sources + ObjectMacros.h docs)
   Analysis/              inspections and code fixes
   Workspace/             symbol index, symbol locator, UnrealWorkspace (loading, file watching)
   Templates/             New Unreal Class: parent class catalog, engine header scan, class generator, Build.cs edits
-  Navigation/, Clang/    Go to Symbol/File index and clangd integration (experimental, off)
+  Navigation/            Go to Symbol/File index (commands hidden, index not built)
 src/UnrealSense.Vsix     VSIX (net48, VSSDK + MEF + Community.VisualStudio.Toolkit)
 tests/                   xUnit tests (unit tests + integration tests against a real UE project)
 tools/UnrealSense.Cli    debugging CLI: dump/parse/assets/analyze...
-experimental/            own C++ indexer written from scratch (usindex: build, serve, scoring against clangd)
+experimental/            own C++ indexer written from scratch (usindex: build, serve, scoring against clangd oracles)
 ```
 
 ## Build and debug

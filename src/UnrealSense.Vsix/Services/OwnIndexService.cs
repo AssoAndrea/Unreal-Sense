@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 using Community.VisualStudio.Toolkit;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using UnrealSense.Clang;
+using UnrealSense.Project;
 using UnrealSense.Extension.Options;
 using UnrealSense.Workspace;
 
@@ -26,6 +26,8 @@ namespace UnrealSense.Extension.Services
     internal sealed class OwnIndexResult
     {
         public string Symbol, Name, Kind;
+        /// <summary>Why the index could not answer (Symbol is then null): shown in the window and logged.</summary>
+        public string Failure;
         public List<OwnIndexUsage> Usages = new List<OwnIndexUsage>();
         public List<OwnIndexUsage> Uncertain = new List<OwnIndexUsage>();
     }
@@ -58,7 +60,7 @@ namespace UnrealSense.Extension.Services
         {
             Hook();
             if (!General.Instance.UseOwnIndex || workspace?.Project == null) { Stop(); return; }
-            Start(workspace.Project.UProjectPath, General.Instance.OwnIndexEngine);
+            StartAsync(workspace.Project, General.Instance.OwnIndexEngine).FireAndForgetLogged("OwnIndex start");
         }
 
         static void Hook()
@@ -73,24 +75,54 @@ namespace UnrealSense.Extension.Services
             {
                 var workspace = WorkspaceService.Current;
                 if (!options.UseOwnIndex) Stop();
-                else if (workspace?.Project != null) Start(workspace.Project.UProjectPath, options.OwnIndexEngine);
+                else if (workspace?.Project != null) StartAsync(workspace.Project, options.OwnIndexEngine).FireAndForgetLogged("OwnIndex start");
             };
         }
 
-        static void Start(string uproject, bool engine)
+        static int startGeneration;
+
+        static async Task StartAsync(UnrealProject project, bool engine)
         {
+            var uproject = project.UProjectPath;
+            int generation;
             lock (gate)
             {
                 if (process != null && !process.HasExited && string.Equals(processProject, uproject, StringComparison.OrdinalIgnoreCase) && processEngine == engine) return;
                 StopLocked();
-                var exe = ExePath;
-                if (!File.Exists(exe))
-                {
-                    StatusText = "own index: indexer not installed";
-                    Log.Write($"OwnIndex: {exe} not found; Find Usages uses the other back-ends");
-                    return;
-                }
-                var psi = new ProcessStartInfo(exe, $"serve \"{uproject}\"" + (engine ? " --engine" : ""))
+                generation = ++startGeneration;
+                StatusText = "own index: preparing the compile database";
+            }
+            var exe = ExePath;
+            if (!File.Exists(exe))
+            {
+                StatusText = "own index: indexer not installed";
+                Log.Write($"OwnIndex: {exe} not found; Find Usages uses a text search");
+                return;
+            }
+
+            // The indexer reads the include paths and definitions of every file from UnrealBuildTool's compile database;
+            // UBT runs only when it is missing or out of date (about a minute).
+            string compileDb;
+            var clock = Stopwatch.StartNew();
+            try
+            {
+                compileDb = await Task.Run(() => CompileDatabase.Ensure(project, m => Log.Write("OwnIndex: " + m))).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                StatusText = "own index: no compile database (" + ex.Message + ")";
+                Log.Error("OwnIndex: compile database", ex);
+                return;
+            }
+            Log.Write($"OwnIndex: compile database ready in {clock.Elapsed.TotalSeconds:F1}s: {compileDb}");
+            // Learn how the project's and engine's folders map to their real paths (substituted drive): the index answers with real paths.
+            RealPaths.CanonicalPath(project.ProjectDirectory);
+            if (project.Engine?.EngineDirectory != null) RealPaths.CanonicalPath(project.Engine.EngineDirectory);
+
+            lock (gate)
+            {
+                if (generation != startGeneration) return; // another start or a stop came meanwhile
+                var psi = new ProcessStartInfo(exe, $"serve \"{uproject}\"" + (engine ? " --engine" : "") + $" \"--db={compileDb}\"")
                 {
                     UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
                     StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8, WorkingDirectory = Path.GetDirectoryName(exe),
@@ -111,7 +143,7 @@ namespace UnrealSense.Extension.Services
                 var errors = new Thread(() => ReadLog(p)) { IsBackground = true, Name = "UnrealSense own index log" };
                 errors.Start();
             }
-            InitializeAsync().FireAndForgetLogged("OwnIndex start");
+            await InitializeAsync().ConfigureAwait(false);
         }
 
         static async Task InitializeAsync()
@@ -196,20 +228,25 @@ namespace UnrealSense.Extension.Services
                 return await tcs.Task.ConfigureAwait(false);
         }
 
-        /// <summary>Usages of the symbol at a position (0-based line and column), or null when the index is not available.</summary>
+        /// <summary>Usages of the symbol at a position (0-based line and column); when the index cannot answer, Symbol is null and Failure says why.</summary>
         public static async Task<OwnIndexResult> FindAsync(string filePath, int line, int column, CancellationToken token)
         {
-            if (!ready) return null;
-            var canonical = ClangdClient.CanonicalPath(filePath);
+            if (!ready) return new OwnIndexResult { Failure = StatusText == "own index: starting" ? "the own index is still building" : StatusText.Replace("own index: ", "the own index: ") };
+            var canonical = RealPaths.CanonicalPath(filePath);
             var answer = await RequestAsync(new JObject
             {
                 ["cmd"] = "refs", ["file"] = canonical, ["altFile"] = filePath, ["line"] = line + 1, ["col"] = column + 1,
             }, token).ConfigureAwait(false);
-            if (answer == null || (bool?)answer["ok"] != true) return null;
+            if (answer == null) return new OwnIndexResult { Failure = "the own index process is not running" };
+            if ((bool?)answer["ok"] != true) return new OwnIndexResult { Failure = "own index error: " + ((string)answer["error"] ?? "unknown") };
             var result = new OwnIndexResult { Symbol = (string)answer["symbol"], Name = (string)answer["name"], Kind = (string)answer["kind"] };
+            if (result.Symbol == null)
+                result.Failure = (bool?)answer["fileIndexed"] == false
+                    ? "this file is not in the own index"
+                    : "the own index resolved no symbol at this position";
             OwnIndexUsage Usage(JToken u) => new OwnIndexUsage
             {
-                FilePath = ClangdClient.ToViewPath(((string)u["file"]).Replace('/', '\\')), Line = (int)u["line"] - 1, Column = (int)u["col"] - 1, Kind = (string)u["kind"],
+                FilePath = RealPaths.ToViewPath(((string)u["file"]).Replace('/', '\\')), Line = (int)u["line"] - 1, Column = (int)u["col"] - 1, Kind = (string)u["kind"],
             };
             foreach (var u in answer["usages"] ?? new JArray()) result.Usages.Add(Usage(u));
             foreach (var u in answer["uncertain"] ?? new JArray()) result.Uncertain.Add(Usage(u));
@@ -249,6 +286,7 @@ namespace UnrealSense.Extension.Services
         static void StopLocked()
         {
             ready = false;
+            startGeneration++;
             var p = process;
             process = null;
             processProject = null;

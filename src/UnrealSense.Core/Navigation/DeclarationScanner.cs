@@ -20,7 +20,7 @@ namespace UnrealSense.Navigation
     /// <summary>
     /// Extracts declarations (types, functions, fields, enums, macros, typedefs, delegates) from a C++ file for
     /// "Go to symbol". It works on statements at namespace/class scope and skips function bodies, so it is fast
-    /// enough to scan the whole engine. It is structural, not semantic: Find Usages uses clangd for that.
+    /// enough to scan the whole engine. It is structural, not semantic: Find Usages uses the own C++ index for that.
     /// </summary>
     public static class DeclarationScanner
     {

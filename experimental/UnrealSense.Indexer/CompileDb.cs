@@ -25,7 +25,8 @@ namespace UnrealSense.Indexer
             var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "UnrealSense", "Cache");
             if (!Directory.Exists(cache)) return null;
             return Directory.GetDirectories(cache, projectName + "-*")
-                .Select(d => Path.Combine(d, "clangd", "compile_commands.files.json"))
+                // "compiledb" since 0.3.19; "clangd" = versions with the clangd index (and the oracle databases)
+                .SelectMany(d => new[] { Path.Combine(d, "compiledb", "compile_commands.files.json"), Path.Combine(d, "clangd", "compile_commands.files.json") })
                 .Where(File.Exists)
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();

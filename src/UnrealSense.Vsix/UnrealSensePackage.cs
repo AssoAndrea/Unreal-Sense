@@ -25,7 +25,7 @@ namespace UnrealSense.Extension
     [Guid(PackageGuids.UnrealSensePackageString)]
     public sealed class UnrealSensePackage : ToolkitPackage
     {
-        public const string Version = "0.3.16";
+        public const string Version = "0.3.18";
 
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {
@@ -39,9 +39,9 @@ namespace UnrealSense.Extension
             catch (Exception) { }
             Log.Write($"UnrealSense {Version} loaded in Visual Studio {vsVersion ?? "?"} ({System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName})");
             ErrorListService.Initialize(this);
-            // Visual Studio's own C++ database was turned off to make room for the semantic index; with that index off, say how to get it back.
-            if (!Options.General.Instance.UseSemanticIndex && VisualStudioTuning.IsApplied)
-                Log.Write("Visual Studio's own C++ indexing is still turned off by UnrealSense, but the semantic index is off: " +
+            // An older version turned Visual Studio's own C++ database off for the clangd index (removed): say how to get it back.
+            if (VisualStudioTuning.IsApplied)
+                Log.Write("Visual Studio's own C++ indexing is still turned off by an older UnrealSense: " +
                           "run Extensions › UnrealSense › Restore Visual Studio Indexing to get Find All References and Go To back.");
 
             VS.Events.SolutionEvents.OnAfterOpenSolution += solution => OpenFromSolutionAsync().FireAndForget();

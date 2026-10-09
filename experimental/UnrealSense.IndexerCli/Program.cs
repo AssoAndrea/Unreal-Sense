@@ -20,7 +20,7 @@ namespace UnrealSense.IndexerCli
             string indexOverride = opts.FirstOrDefault(o => o.StartsWith("--index="))?.Substring(8);
             switch (pos[0])
             {
-                case "serve": return Serve.Run(pos[1], opts.Contains("--engine"), threads, IndexPath(pos[1], opts.Contains("--engine"), indexOverride));
+                case "serve": return Serve.Run(pos[1], opts.Contains("--engine"), threads, IndexPath(pos[1], opts.Contains("--engine"), indexOverride), opts.FirstOrDefault(o => o.StartsWith("--db="))?.Substring(5));
                 case "reoracle": return Oracle.Requery(pos[1], pos[2], pos[3], pos.Count > 4 ? int.Parse(pos[4]) : 8);
                 case "oracle": return Oracle.Run(pos[1], pos[2], pos[3], pos.Count > 4 ? int.Parse(pos[4]) : 4);
                 case "build": return Build(pos[1], opts.Contains("--engine"), threads, indexOverride, opts.Contains("--full"));

@@ -30,14 +30,14 @@ namespace UnrealSense.IndexerCli
         static readonly List<Action<BuildStats>> waiting = new List<Action<BuildStats>>();
         static bool running;
 
-        public static int Run(string uproject, bool engine, int threads, string indexPath)
+        public static int Run(string uproject, bool engine, int threads, string indexPath, string compileDb = null)
         {
             Console.InputEncoding = System.Text.Encoding.UTF8;
             var stdout = new StreamWriter(Console.OpenStandardOutput(), new System.Text.UTF8Encoding(false)) { AutoFlush = true };
             void Send(JObject o) { lock (writeLock) stdout.WriteLine(o.ToString(Formatting.None)); }
             void Log(string m) { lock (writeLock) Console.Error.WriteLine(m); }
 
-            Log($"usindex serve {uproject} engine={engine} index={indexPath}");
+            Log($"usindex serve {uproject} engine={engine} index={indexPath} db={compileDb ?? "(found in the cache)"}");
             // the previous index answers at once while the first (incremental) build runs
             if (File.Exists(indexPath))
                 try { index = IndexData.Load(indexPath); Log($"previous index loaded: {index.Files.Length} files, {index.SymbolCount} symbols"); }
@@ -59,7 +59,7 @@ namespace UnrealSense.IndexerCli
                             Send(new JObject { ["id"] = id, ["ok"] = true, ["ready"] = index != null, ["building"] = running });
                             break;
                         case "build":
-                            StartBuild(uproject, engine, threads, indexPath, Log, stats => Send(new JObject
+                            StartBuild(uproject, engine, threads, indexPath, compileDb, Log, stats => Send(new JObject
                             {
                                 ["id"] = id, ["ok"] = stats != null, ["seconds"] = stats?.Total ?? 0, ["files"] = stats?.Files ?? 0,
                                 ["incremental"] = stats?.Incremental ?? false, ["changed"] = stats?.ChangedFiles ?? 0,
@@ -86,7 +86,7 @@ namespace UnrealSense.IndexerCli
         /// One build at a time. Requests that arrive during a build are answered by the next one (their files may have changed
         /// after the running build listed them); any number of them make a single further build.
         /// </summary>
-        static void StartBuild(string uproject, bool engine, int threads, string indexPath, Action<string> log, Action<BuildStats> done)
+        static void StartBuild(string uproject, bool engine, int threads, string indexPath, string compileDb, Action<string> log, Action<BuildStats> done)
         {
             lock (buildLock)
             {
@@ -100,21 +100,21 @@ namespace UnrealSense.IndexerCli
                 {
                     List<Action<BuildStats>> callbacks;
                     lock (buildLock) { callbacks = waiting.ToList(); waiting.Clear(); }
-                    var stats = RunBuild(uproject, engine, threads, indexPath, log);
+                    var stats = RunBuild(uproject, engine, threads, indexPath, compileDb, log);
                     foreach (var cb in callbacks) cb(stats);
                     lock (buildLock) if (waiting.Count == 0) { running = false; return; }
                 }
             });
         }
 
-        static BuildStats RunBuild(string uproject, bool engine, int threads, string indexPath, Action<string> log)
+        static BuildStats RunBuild(string uproject, bool engine, int threads, string indexPath, string compileDb, Action<string> log)
         {
             try
             {
                 var clock = Stopwatch.StartNew();
                 var data = new IndexBuilder().Build(new BuildOptions
                 {
-                    UProject = uproject, Engine = engine, Threads = threads, IndexPath = indexPath,
+                    UProject = uproject, Engine = engine, Threads = threads, IndexPath = indexPath, CompileDbPath = compileDb,
                     Log = m => log($"[{clock.Elapsed.TotalSeconds,6:F1}s] {m}"),
                 }, out var stats);
                 if (!stats.Unchanged) data.Save(indexPath);
@@ -136,7 +136,12 @@ namespace UnrealSense.IndexerCli
             int line = (int)req["line"], col = (int)req["col"];
             int sym = data.SymbolAt(file, line, col);
             if (sym < 0 && !string.IsNullOrEmpty(alt)) sym = data.SymbolAt(alt, line, col);
-            if (sym < 0) return new JObject { ["id"] = id, ["ok"] = true, ["symbol"] = null, ["usages"] = new JArray(), ["uncertain"] = new JArray() };
+            if (sym < 0)
+                return new JObject
+                {
+                    ["id"] = id, ["ok"] = true, ["symbol"] = null, ["usages"] = new JArray(), ["uncertain"] = new JArray(),
+                    ["fileIndexed"] = data.FileId(file) >= 0 || (!string.IsNullOrEmpty(alt) && data.FileId(alt) >= 0),
+                };
             var usages = new JArray();
             foreach (var r in data.Usages(sym).OrderBy(r => data.Files[r.File], StringComparer.OrdinalIgnoreCase).ThenBy(r => r.Line).ThenBy(r => r.Col))
                 usages.Add(new JObject { ["file"] = data.Files[r.File], ["line"] = r.Line, ["col"] = r.Col, ["kind"] = ((RefKind)r.Kind).ToString() });

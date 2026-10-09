@@ -1,11 +1,11 @@
 using System;
 using System.IO;
 
-namespace UnrealSense.Clang
+namespace UnrealSense.Cpp
 {
     public enum ReferenceKind { Declaration, Call, Write, Read, Generated }
 
-    /// <summary>Labels a reference from the text around it (clangd only tells us where, not how).</summary>
+    /// <summary>Labels a reference from the text around it (the index tells where, not how).</summary>
     public static class ReferenceClassifier
     {
         public static bool IsGeneratedFile(string path)

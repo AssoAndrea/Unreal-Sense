@@ -121,7 +121,7 @@ namespace UnrealSense.Indexer
             var uproject = o.UProject.EndsWith(".uproject", StringComparison.OrdinalIgnoreCase) ? o.UProject : Directory.GetFiles(o.UProject, "*.uproject").First();
             var projectDir = CompileDb.Norm(Path.GetDirectoryName(Path.GetFullPath(uproject)));
             var projectName = Path.GetFileNameWithoutExtension(uproject);
-            var dbPath = o.CompileDbPath ?? CompileDb.FindFor(projectName) ?? throw new InvalidOperationException("compile_commands.files.json not found for " + projectName + " (open the project once with UnrealSense)");
+            var dbPath = o.CompileDbPath ?? CompileDb.FindFor(projectName) ?? throw new InvalidOperationException("compile_commands.files.json not found for " + projectName + " (UnrealSense writes it with UnrealBuildTool when the own index starts)");
             var db = CompileDb.Load(dbPath);
             var engineDir = CompileDb.Norm(Path.GetFullPath(Path.Combine(db.EngineSourceDir, "..")));
             o.Log($"project {projectDir}, engine {engineDir}, compile db: {db.Files.Count} entries, {db.IncludeDirs.Count} include dirs, {db.Defines.Count} /D, {db.ForcedIncludes.Count} forced includes");

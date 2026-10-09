@@ -10,8 +10,6 @@ namespace UnrealSense.Extension.Options
         public class GeneralPage : BaseOptionPage<General> { }
     }
 
-    public enum ClangdGoToDefinitionMode { Auto, Always, Never }
-
     /// <summary>Tools › Options › UnrealSense › General.</summary>
     public class General : BaseOptionModel<General>
     {
@@ -51,7 +49,7 @@ namespace UnrealSense.Extension.Options
 
         [Category("Find Usages (own index, experimental)")]
         [DisplayName("Use the own C++ index (experimental)")]
-        [Description("Find Usages from UnrealSense's own C++ indexer (an external process, no clangd): built in seconds, updated incrementally when C++ files are saved. Shows the Find Usages command. Off by default.")]
+        [Description("Find Usages from UnrealSense's own C++ indexer (an external process): built in seconds, updated incrementally when C++ files are saved. Shows the Find Usages command. Off by default.")]
         [DefaultValue(false)]
         public bool UseOwnIndex { get; set; } = false;
 
@@ -61,62 +59,7 @@ namespace UnrealSense.Extension.Options
         [DefaultValue(false)]
         public bool OwnIndexEngine { get; set; } = false;
 
-        [Category("Find Usages (clangd)")]
-        [DisplayName("Enable semantic C++ index (experimental)")]
-        [Description("Run clangd with a background index of the project and engine, so Find Usages resolves the real symbol (pippo->Get() only finds the Get of pippo's class). Off by default: indexing a large engine takes long. When off, Find Usages shows whole-word text matches plus Blueprint usages.")]
-        [DefaultValue(false)]
-        // New name on purpose: the old EnableSemanticIndex value saved by earlier versions (on) must not carry over.
-        public bool UseSemanticIndex { get; set; } = false;
-
-        [Category("Find Usages (clangd)")]
-        [DisplayName("clangd path")]
-        [Description("Optional path to clangd.exe. Empty = %LOCALAPPDATA%\\UnrealSense\\clangd, then LLVM, then PATH.")]
-        [DefaultValue("")]
-        public string ClangdPath { get; set; } = "";
-
-        [Category("Find Usages (clangd)")]
-        [DisplayName("Index folder (shareable)")]
-        [Description("Where the C++ index is stored. Empty = %LOCALAPPDATA%\\UnrealSense\\Cache. Use a path that is identical on every machine (e.g. S:\\UnrealSenseCache) to index the engine once and copy that folder to the rest of the team: files that did not change are not indexed again.")]
-        [DefaultValue("")]
-        public string IndexCacheFolder { get; set; } = "";
-
-        [Category("Find Usages (clangd)")]
-        [DisplayName("Index engine and plugin source files")]
-        [Description("Also index the .cpp files of a source-built engine and of all plugins, so Find Usages covers engine and cross-project code. The project is indexed first; files are grouped by module into unity translation units, which makes the first full index many times faster.")]
-        [DefaultValue(true)]
-        public bool IndexEngineSources { get; set; } = true;
-
-        [Category("Find Usages (clangd)")]
-        [DisplayName("Group files across modules")]
-        [Description("Index source files of different modules that share compiler options in the same translation unit (with the union of their include paths and definitions). Far fewer units, so a much faster first index of a source-built engine. Disable if a module's references look incomplete (clashing header or local names between modules).")]
-        [DefaultValue(true)]
-        public bool UnityAcrossModules { get; set; } = true;
-
-        [Category("Find Usages (clangd)")]
-        [DisplayName("Engine folders excluded from indexing")]
-        [Description("Semicolon-separated path fragments to skip, e.g. Engine/Source/Developer/;Engine/Plugins/Online/. Empty = index everything in the build target.")]
-        [DefaultValue("")]
-        public string EngineIndexExclusions { get; set; } = "";
-
-        [Category("Find Usages (clangd)")]
-        [DisplayName("Indexing threads")]
-        [Description("Threads used by the background index. 0 = automatic: up to 8 (more is slower on machines with real-time antivirus scanning), at most one per 4.5 GB of RAM beyond 8 GB.")]
-        [DefaultValue(0)]
-        public int SemanticIndexThreads { get; set; } = 0;
-
-        [Category("Find Usages (clangd)")]
-        [DisplayName("Index at low priority")]
-        [Description("Run indexing below normal priority, so builds and the editor get the CPU first (indexing then takes longer while you work). Off by default: indexing uses all the power it can.")]
-        [DefaultValue(false)]
-        public bool SemanticIndexLowPriority { get; set; } = false;
-
-        [Category("Find Usages (clangd)")]
-        [DisplayName("Go to Definition with clangd")]
-        [Description("Auto: F12 uses clangd when Visual Studio's C++ database is disabled (Extensions › UnrealSense › Use UnrealSense instead of Visual Studio indexing). Always / Never force it on or off.")]
-        [DefaultValue(ClangdGoToDefinitionMode.Auto)]
-        public ClangdGoToDefinitionMode ClangdGoToDefinition { get; set; } = ClangdGoToDefinitionMode.Auto;
-
-        [Category("Find Usages (clangd)")]
+        [Category("Find Usages (own index, experimental)")]
         [DisplayName("Show UHT-generated references")]
         [Description("Include references from .gen.cpp/.generated.h files (Blueprint thunks).")]
         [DefaultValue(false)]

@@ -35,6 +35,11 @@ namespace UnrealSense.Workspace
         /// <summary>Go to symbol/file index (project + engine); cached results are usable while it refreshes.</summary>
         public Navigation.GoToIndex GoTo { get; } = new Navigation.GoToIndex();
         public WorkspaceState GoToState { get; private set; }
+        /// <summary>
+        /// False: the go-to index is not built (nor kept up to date) on load. The extension keeps Go to Symbol/File hidden,
+        /// and the index costs ~15 s of CPU and a lot of memory on a large source-built engine.
+        /// </summary>
+        public bool BuildGoToIndex { get; set; } = true;
         IReadOnlyList<Navigation.IndexRoot> goToRoots;
         public WorkspaceState State { get; private set; }
         public WorkspaceState AssetState { get; private set; }
@@ -66,11 +71,11 @@ namespace UnrealSense.Workspace
 
                 // The three indexes are independent: build them concurrently so a large Content folder does not
                 // delay Go to Symbol (which serves its cache immediately anyway).
-                GoToState = WorkspaceState.Loading;
                 AssetState = WorkspaceState.Loading;
-                goToRoots = Navigation.GoToRoots.For(Project);
-                var goTo = Task.Run(() =>
+                var goTo = !BuildGoToIndex ? Task.CompletedTask : Task.Run(() =>
                 {
+                    GoToState = WorkspaceState.Loading;
+                    goToRoots = Navigation.GoToRoots.For(Project);
                     var sw = Stopwatch.StartNew();
                     GoTo.Build(goToRoots, Navigation.GoToRoots.CachePath(Project), progress, token);
                     GoToState = WorkspaceState.Ready;
@@ -268,7 +273,7 @@ namespace UnrealSense.Workspace
             if (changedCode.Count > 0) CodeFilesChanged?.Invoke(changedCode);
         }
 
-        /// <summary>Source files created/changed/deleted on disk (after debouncing), e.g. to refresh clangd.</summary>
+        /// <summary>Source files created/changed/deleted on disk (after debouncing).</summary>
         public event Action<IReadOnlyList<string>> CodeFilesChanged;
 
         public void Dispose()

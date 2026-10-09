@@ -128,36 +128,15 @@
           <ButtonText>Find Usages</ButtonText>
         </Strings>
       </Button>
-      <Button guid="guidUnrealSenseCmdSet" id="RegenerateClangDatabase" priority="0x0130" type="Button">
-        <Icon guid="ImageCatalogGuid" id="Refresh" />
-        <CommandFlag>IconIsMoniker</CommandFlag>
-        <Strings>
-          <ButtonText>Rebuild C++ Semantic Index (clangd)</ButtonText>
-        </Strings>
-      </Button>
-      <Button guid="guidUnrealSenseCmdSet" id="DiagnoseIndexErrors" priority="0x0135" type="Button">
-        <Icon guid="ImageCatalogGuid" id="StatusError" />
-        <CommandFlag>IconIsMoniker</CommandFlag>
-        <Strings>
-          <ButtonText>Diagnose C++ Index Errors</ButtonText>
-        </Strings>
-      </Button>
-      <Button guid="guidUnrealSenseCmdSet" id="DownloadClangd" priority="0x0140" type="Button">
-        <Icon guid="ImageCatalogGuid" id="Download" />
-        <CommandFlag>IconIsMoniker</CommandFlag>
-        <Strings>
-          <ButtonText>Download clangd...</ButtonText>
-        </Strings>
-      </Button>
       <Button guid="guidUnrealSenseCmdSet" id="ToggleVsIndexing" priority="0x0090" type="Button">
+        <!-- visible only to undo what older versions did (Visual Studio's C++ database turned off) -->
         <Parent guid="guidUnrealSenseCmdSet" id="ToolsGroup" />
         <Icon guid="ImageCatalogGuid" id="Settings" />
         <CommandFlag>IconIsMoniker</CommandFlag>
         <CommandFlag>DynamicVisibility</CommandFlag>
         <CommandFlag>DefaultInvisible</CommandFlag>
-        <CommandFlag>TextChanges</CommandFlag>
         <Strings>
-          <ButtonText>Use UnrealSense Instead of Visual Studio Indexing...</ButtonText>
+          <ButtonText>Restore Visual Studio Indexing</ButtonText>
         </Strings>
       </Button>
       <Button guid="guidUnrealSenseCmdSet" id="ToggleVisualAssist" priority="0x0100" type="Button">
@@ -217,11 +196,9 @@
       <IDSymbol name="FindSymbol" value="0x0106" />
       <IDSymbol name="FindFile" value="0x0107" />
       <IDSymbol name="FindUsages" value="0x0108" />
-      <IDSymbol name="RegenerateClangDatabase" value="0x0109" />
-      <IDSymbol name="DownloadClangd" value="0x010A" />
+      <!-- 0x0109, 0x010A and 0x010D were the clangd commands (removed) -->
       <IDSymbol name="ToggleVisualAssist" value="0x010B" />
       <IDSymbol name="ToggleVsIndexing" value="0x010C" />
-      <IDSymbol name="DiagnoseIndexErrors" value="0x010D" />
       <IDSymbol name="EnableOpenAssetsInEditor" value="0x010E" />
       <IDSymbol name="NewUnrealClass" value="0x010F" />
       <IDSymbol name="ToolsGroup" value="0x1104" />

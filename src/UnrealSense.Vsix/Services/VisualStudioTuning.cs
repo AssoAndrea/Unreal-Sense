@@ -8,11 +8,9 @@ using Microsoft.VisualStudio.Shell.Settings;
 namespace UnrealSense.Extension.Services
 {
     /// <summary>
-    /// Turns off the Visual Studio indexing that UnrealSense replaces, and restores it on demand:
-    /// the C++ browsing database (Browse.VC.db: Go To All, Find All References, cross-file Go To Definition —
-    /// replaced by Go to Symbol, Find Usages and clangd Go to Definition) and the Blueprint scanning of
-    /// Microsoft's Unreal Engine integration (replaced by the Blueprint usage index). Previous values are
-    /// saved in UnrealSense's settings so "Restore" puts back exactly what the user had.
+    /// Restores the Visual Studio indexing that versions up to 0.3.18 could turn off for the clangd index (removed): the C++
+    /// browsing database (Browse.VC.db) and the Blueprint scanning of Microsoft's Unreal Engine integration. The values
+    /// the user had were saved in UnrealSense's settings, so "Restore" puts back exactly those.
     /// </summary>
     internal static class VisualStudioTuning
     {
@@ -44,49 +42,6 @@ namespace UnrealSense.Extension.Services
                 ThreadHelper.ThrowIfNotOnUIThread();
                 return Store().CollectionExists(BackupCollection);
             }
-        }
-
-        /// <summary>True when Visual Studio's C++ database is off (by us or by the user).</summary>
-        public static bool IsCppDatabaseDisabled
-        {
-            get
-            {
-                ThreadHelper.ThrowIfNotOnUIThread();
-                return CppOption("DisableDatabase", null, true).Read() == true;
-            }
-        }
-
-        public static string Describe()
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            var lines = new List<string>();
-            foreach (var t in Tweaks()) lines.Add("• " + t.Label);
-            return string.Join("\n", lines);
-        }
-
-        public static List<string> Apply()
-        {
-            ThreadHelper.ThrowIfNotOnUIThread();
-            var store = Store();
-            if (!store.CollectionExists(BackupCollection)) store.CreateCollection(BackupCollection);
-            var log = new List<string>();
-            foreach (var t in Tweaks())
-            {
-                try
-                {
-                    var current = t.Read();
-                    if (current == null) { log.Add($"{t.Label}: not available in this Visual Studio"); continue; }
-                    if (!store.PropertyExists(BackupCollection, t.Id)) store.SetBoolean(BackupCollection, t.Id, current.Value);
-                    if (current.Value != t.Desired) t.Write(t.Desired);
-                    log.Add($"{t.Label}: {(current.Value == t.Desired ? "already off" : "turned off")}");
-                }
-                catch (Exception ex)
-                {
-                    log.Add($"{t.Label}: failed ({ex.GetBaseException().Message})");
-                }
-            }
-            foreach (var line in log) Log.Write("VS tuning: " + line);
-            return log;
         }
 
         public static List<string> Restore()

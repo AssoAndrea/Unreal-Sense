@@ -10,7 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using UnrealSense.Clang;
+using UnrealSense.Project;
 
 namespace UnrealSense.Remote
 {
@@ -108,7 +108,7 @@ namespace UnrealSense.Remote
             string Normalize(string path)
             {
                 if (string.IsNullOrEmpty(path)) return null;
-                try { return ClangdClient.CanonicalPath(path.Replace('/', '\\').TrimEnd('\\')).TrimEnd('\\'); }
+                try { return RealPaths.CanonicalPath(path.Replace('/', '\\').TrimEnd('\\')).TrimEnd('\\'); }
                 catch (Exception) { return path.Replace('/', '\\').TrimEnd('\\'); }
             }
             var wanted = Normalize(projectDirectory);

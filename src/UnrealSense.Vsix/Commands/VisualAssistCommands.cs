@@ -6,57 +6,24 @@ using UnrealSense.Extension.Services;
 
 namespace UnrealSense.Extension.Commands
 {
-    [Command(PackageGuids.UnrealSenseCmdSetString, PackageIds.DiagnoseIndexErrors)]
-    internal sealed class DiagnoseIndexErrorsCommand : BaseCommand<DiagnoseIndexErrorsCommand>
-    {
-        protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
-        {
-            var directory = ClangdService.CompileCommandsDirectory;
-            if (directory == null)
-            {
-                await VS.StatusBar.ShowMessageAsync("UnrealSense: the C++ index has not started yet.");
-                return;
-            }
-            await Log.GetPane().ActivateAsync();
-            await Task.Run(() => IndexDiagnostics.RunAsync(directory));
-        }
-    }
-
+    /// <summary>
+    /// Undoes what older versions did for the clangd index (Visual Studio's own C++ database turned off); visible only
+    /// while those settings are still applied.
+    /// </summary>
     [Command(PackageGuids.UnrealSenseCmdSetString, PackageIds.ToggleVsIndexing)]
     internal sealed class ToggleVsIndexingCommand : BaseCommand<ToggleVsIndexingCommand>
     {
         protected override void BeforeQueryStatus(EventArgs e)
         {
             ThreadHelper.ThrowIfNotOnUIThread();
-            // Only offered to undo it: turning Visual Studio's indexing off belongs to the (hidden) semantic index.
             Command.Visible = VisualStudioTuning.IsApplied;
-            Command.Text = VisualStudioTuning.IsApplied
-                ? "Restore Visual Studio Indexing"
-                : "Use UnrealSense Instead of Visual Studio Indexing...";
         }
 
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
-            System.Collections.Generic.List<string> result;
-            if (VisualStudioTuning.IsApplied)
-            {
-                result = VisualStudioTuning.Restore();
-            }
-            else
-            {
-                var message =
-                    "UnrealSense will turn off this Visual Studio indexing, which it replaces:\n\n" +
-                    VisualStudioTuning.Describe() + "\n\n" +
-                    "Replacements: Go to Symbol/File (Alt+Shift+S/O) for Go To All, Find Usages (Alt+Shift+F) for Find All " +
-                    "References, Go to Definition (F12) through clangd, Blueprint usages from UnrealSense's own index.\n\n" +
-                    "Still available: IntelliSense completion, Quick Info, squiggles, the Unreal Engine log, test adapter and code analysis.\n" +
-                    "No longer available while this is on: Class View, Call Hierarchy and Peek Definition into other files.\n\n" +
-                    "Your current settings are saved; run this command again to restore them. Continue?";
-                if (!await VS.MessageBox.ShowConfirmAsync("UnrealSense", message)) return;
-                result = VisualStudioTuning.Apply();
-            }
-            var summary = string.Join("\n", result);
+            if (!VisualStudioTuning.IsApplied) return;
+            var summary = string.Join("\n", VisualStudioTuning.Restore());
             if (await VS.MessageBox.ShowConfirmAsync("UnrealSense", summary + "\n\nThe changes apply after Visual Studio restarts. Restart now?"))
                 VisualAssistService.Restart();
         }

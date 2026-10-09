@@ -22,11 +22,8 @@ namespace UnrealSense.Extension
         public const int FindSymbol = 0x0106;
         public const int FindFile = 0x0107;
         public const int FindUsages = 0x0108;
-        public const int RegenerateClangDatabase = 0x0109;
-        public const int DownloadClangd = 0x010A;
         public const int ToggleVisualAssist = 0x010B;
         public const int ToggleVsIndexing = 0x010C;
-        public const int DiagnoseIndexErrors = 0x010D;
         public const int EnableOpenAssetsInEditor = 0x010E;
         public const int NewUnrealClass = 0x010F;
     }

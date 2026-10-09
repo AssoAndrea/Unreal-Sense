@@ -15,7 +15,7 @@ using Microsoft.VisualStudio.Imaging;
 using Microsoft.VisualStudio.Imaging.Interop;
 using Microsoft.VisualStudio.PlatformUI;
 using Microsoft.VisualStudio.Shell;
-using UnrealSense.Clang;
+using UnrealSense.Cpp;
 using UnrealSense.Extension.Services;
 
 namespace UnrealSense.Extension.ToolWindows
@@ -106,21 +106,15 @@ namespace UnrealSense.Extension.ToolWindows
             tree.Items.Clear();
             if (results == null) return;
             var visible = results.Code.Where(u => filters[u.Kind].IsChecked == true).ToList();
+            var uncertain = results.Uncertain.Where(u => filters[u.Kind].IsChecked == true).ToList();
             int files = visible.Select(u => u.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
             summary.Text = $"{visible.Count} code usage{(visible.Count == 1 ? "" : "s")} in {files} file{(files == 1 ? "" : "s")}"
+                           + (uncertain.Count > 0 ? $" · {uncertain.Count} uncertain" : "")
                            + (results.Blueprints.Count > 0 ? $" · {results.Blueprints.Count} Blueprint usage{(results.Blueprints.Count == 1 ? "" : "s")}" : "")
-                           + $" · {results.Source ?? (results.IsSemantic ? "semantic (clangd)" : "text search")} · {results.Milliseconds:F0} ms";
+                           + $" · {results.Source ?? "text search"} · {results.Milliseconds:F0} ms";
 
-            var project = WorkspaceService.Current?.Project?.ProjectDirectory;
-            foreach (var group in visible.GroupBy(u => u.FilePath, StringComparer.OrdinalIgnoreCase).OrderBy(g => g.Key))
-            {
-                var display = project != null && group.Key.StartsWith(project, StringComparison.OrdinalIgnoreCase) ? group.Key.Substring(project.Length).TrimStart('\\') : group.Key;
-                var fileNode = UiHelpers.Node(Path.GetFileName(group.Key), FileIcon(group.Key), null, null, $"{Path.GetDirectoryName(display)}  ({group.Count()})", expanded: false);
-                fileNode.IsExpanded = true;
-                foreach (var usage in group.OrderBy(u => u.Line))
-                    fileNode.Items.Add(UsageNode(usage));
+            foreach (var fileNode in FileNodes(visible))
                 tree.Items.Add(fileNode);
-            }
 
             if (results.Blueprints.Count > 0)
             {
@@ -130,6 +124,31 @@ namespace UnrealSense.Extension.ToolWindows
                     bp.Items.Add(UiHelpers.Node(u.Asset.AssetName, KnownMonikers.ClassFile, () => EditorNavigation.RevealInExplorer(u.Asset.FilePath), null,
                         $"{UnrealSense.Extension.Editor.UnrealQuickInfoSource.Describe(u.Kind)} · {u.Asset.PackageName}"));
                 tree.Items.Add(bp);
+            }
+
+            // Last: the own index found the name on an object whose type it could not infer; the user decides.
+            if (uncertain.Count > 0)
+            {
+                var node = UiHelpers.Node("Uncertain", KnownMonikers.StatusHelp, null, null,
+                    $"({uncertain.Count}) the name on an object whose type could not be inferred: may be other symbols");
+                node.IsExpanded = true;
+                foreach (var fileNode in FileNodes(uncertain))
+                    node.Items.Add(fileNode);
+                tree.Items.Add(node);
+            }
+        }
+
+        static IEnumerable<TreeViewItem> FileNodes(IEnumerable<CodeUsage> usages)
+        {
+            var project = WorkspaceService.Current?.Project?.ProjectDirectory;
+            foreach (var group in usages.GroupBy(u => u.FilePath, StringComparer.OrdinalIgnoreCase).OrderBy(g => g.Key))
+            {
+                var display = project != null && group.Key.StartsWith(project, StringComparison.OrdinalIgnoreCase) ? group.Key.Substring(project.Length).TrimStart('\\') : group.Key;
+                var fileNode = UiHelpers.Node(Path.GetFileName(group.Key), FileIcon(group.Key), null, null, $"{Path.GetDirectoryName(display)}  ({group.Count()})", expanded: false);
+                fileNode.IsExpanded = true;
+                foreach (var usage in group.OrderBy(u => u.Line))
+                    fileNode.Items.Add(UsageNode(usage));
+                yield return fileNode;
             }
         }
 

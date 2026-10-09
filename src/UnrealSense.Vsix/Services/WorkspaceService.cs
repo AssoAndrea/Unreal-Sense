@@ -95,8 +95,8 @@ namespace UnrealSense.Extension.Services
 
                 var previous = current;
                 previous?.Dispose();
-                if (previous != null) System.Threading.Tasks.Task.Run(() => ClangdService.Stop(previous));
-                var workspace = new UnrealWorkspace();
+                // Go to Symbol/File is hidden: its index is not built.
+                var workspace = new UnrealWorkspace { BuildGoToIndex = false };
                 workspace.Changed += (s, e) => Changed?.Invoke(s, EventArgs.Empty);
                 workspace.Timing += t => Log.Write("Timing: " + t);
                 current = workspace;
@@ -115,7 +115,6 @@ namespace UnrealSense.Extension.Services
                         Log.Error("Blueprint index failed", workspace.LastError);
                     if (workspace.State == WorkspaceState.Ready && current == workspace)
                     {
-                        ClangdService.OnWorkspaceReady(workspace);
                         OwnIndexService.OnWorkspaceReady(workspace);
                     }
                 }, System.Threading.Tasks.TaskScheduler.Default);
@@ -146,7 +145,6 @@ namespace UnrealSense.Extension.Services
                 current = null;
                 currentUProject = null;
             }
-            System.Threading.Tasks.Task.Run(() => ClangdService.Stop());
             System.Threading.Tasks.Task.Run(() => OwnIndexService.Stop());
             Changed?.Invoke(null, EventArgs.Empty);
         }
@@ -173,13 +171,13 @@ namespace UnrealSense.Extension.Services
         /// </summary>
         static bool SameFile(string a, string b) =>
             string.Equals(a, b, StringComparison.OrdinalIgnoreCase)
-            || (a != null && b != null && string.Equals(Clang.ClangdClient.CanonicalPath(a), Clang.ClangdClient.CanonicalPath(b), StringComparison.OrdinalIgnoreCase));
+            || (a != null && b != null && string.Equals(RealPaths.CanonicalPath(a), RealPaths.CanonicalPath(b), StringComparison.OrdinalIgnoreCase));
 
         static bool IsUnder(string file, string directory)
         {
             bool Under(string f, string d) => f.StartsWith(d.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase);
             return Under(Path.GetFullPath(file), Path.GetFullPath(directory))
-                   || Under(Clang.ClangdClient.CanonicalPath(file), Clang.ClangdClient.CanonicalPath(directory));
+                   || Under(RealPaths.CanonicalPath(file), RealPaths.CanonicalPath(directory));
         }
     }
 }
