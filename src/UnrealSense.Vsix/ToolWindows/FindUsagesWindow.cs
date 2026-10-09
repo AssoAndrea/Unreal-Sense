@@ -89,7 +89,7 @@ namespace UnrealSense.Extension.ToolWindows
             }
             root.Children.Add(tree);
             Content = root;
-            title.Text = "Find Usages (Alt+Shift+F) on a symbol to see where it is used.";
+            title.Text = "Find Usages (editor context menu or Extensions › UnrealSense) on a symbol to see where it is used.";
         }
 
         public void Show(UsageResults r)
@@ -109,7 +109,7 @@ namespace UnrealSense.Extension.ToolWindows
             int files = visible.Select(u => u.FilePath).Distinct(StringComparer.OrdinalIgnoreCase).Count();
             summary.Text = $"{visible.Count} code usage{(visible.Count == 1 ? "" : "s")} in {files} file{(files == 1 ? "" : "s")}"
                            + (results.Blueprints.Count > 0 ? $" · {results.Blueprints.Count} Blueprint usage{(results.Blueprints.Count == 1 ? "" : "s")}" : "")
-                           + $" · {(results.IsSemantic ? "semantic (clangd)" : "text search")} · {results.Milliseconds:F0} ms";
+                           + $" · {results.Source ?? (results.IsSemantic ? "semantic (clangd)" : "text search")} · {results.Milliseconds:F0} ms";
 
             var project = WorkspaceService.Current?.Project?.ProjectDirectory;
             foreach (var group in visible.GroupBy(u => u.FilePath, StringComparer.OrdinalIgnoreCase).OrderBy(g => g.Key))

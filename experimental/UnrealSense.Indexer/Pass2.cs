@@ -1552,7 +1552,7 @@ namespace UnrealSense.Indexer
                         }
                         else if (other.Kind == SymKind.TemplateParam) ti = new TypeInfo { Sym = other };
                         else ti = new TypeInfo { Sym = other, Args = targs };
-                        return new Val { TypeVal = ti, Scope = other, Dependent = other.Kind == SymKind.TemplateParam };
+                        return new Val { TypeVal = ti, Scope = other, Dependent = other.Kind == SymKind.TemplateParam, FuncTok = nameTok };
                     }
                     return Val.Unknown;
             }
@@ -2055,7 +2055,8 @@ namespace UnrealSense.Indexer
         {
             if (callee.Funcs != null)
             {
-                if (callee.Funcs.Count > 1 && args != null && args.Any(a => a != null && a.Dependent))
+                // an argument whose type is a template parameter (Type* Obj) makes the call dependent too
+                if (callee.Funcs.Count > 1 && args != null && args.Any(a => a != null && (a.Dependent || a.Type?.Sym?.Kind == SymKind.TemplateParam)))
                 {
                     // dependent call: overload resolution happens at instantiation; the reference names every candidate
                     foreach (var cand in callee.Funcs) { emitted[callee.FuncTok < emitted.Length && T == Parser.T ? callee.FuncTok : 0] = 0; Emit(cand, callee.FuncTok, RefKind.Call); }
@@ -2090,7 +2091,22 @@ namespace UnrealSense.Indexer
                 if (ret != null && ret.Sym != null && ret.Sym.Kind == SymKind.TemplateParam) ret = null;
                 return Val.Of(ret);
             }
-            if (callee.TypeVal != null) return new Val { Type = callee.TypeVal, Dependent = callee.Dependent };
+            if (callee.TypeVal != null)
+            {
+                // T(args): a temporary built by one of T's constructors, which clangd references at the type name
+                var cls = callee.TypeVal.Sym;
+                if (callee.FuncTok >= 0 && cls != null && cls.IsClassLike && callee.TypeVal.Ptr == 0)
+                {
+                    var m = cls.GetMember(SymbolTable.CtorKey);
+                    var ctors = m is Symbol one ? new List<Symbol> { one } : m is List<Symbol> l ? l.Where(x => x.Kind == SymKind.Function).ToList() : null;
+                    if (ctors != null && ctors.Count > 0)
+                    {
+                        var f = ChooseOverload(ctors, args, null, false);
+                        if (f != null) { emitted[callee.FuncTok] = 0; Emit(f, callee.FuncTok, RefKind.Call); }
+                    }
+                }
+                return new Val { Type = callee.TypeVal, Dependent = callee.Dependent };
+            }
             if (callee.Dependent) return new Val { Dependent = true };
             var t = callee.Type;
             if (t != null)

@@ -117,9 +117,13 @@
           <ButtonText>Go to File...</ButtonText>
         </Strings>
       </Button>
-      <Button guid="guidUnrealSenseCmdSet" id="FindUsages" priority="0x0092" type="Button">
+      <Button guid="guidUnrealSenseCmdSet" id="FindUsages" priority="0x0105" type="Button">
+        <!-- visible only with the experimental own C++ index (option UseOwnIndex) -->
+        <Parent guid="guidUnrealSenseCmdSet" id="NavigationGroup" />
         <Icon guid="ImageCatalogGuid" id="FindInFile" />
         <CommandFlag>IconIsMoniker</CommandFlag>
+        <CommandFlag>DynamicVisibility</CommandFlag>
+        <CommandFlag>DefaultInvisible</CommandFlag>
         <Strings>
           <ButtonText>Find Usages</ButtonText>
         </Strings>
@@ -170,6 +174,9 @@
 
   <CommandPlacements>
     <CommandPlacement guid="guidUnrealSenseCmdSet" id="FindBlueprintUsages" priority="0x0100">
+      <Parent guid="guidUnrealSenseCmdSet" id="EditorContextGroup" />
+    </CommandPlacement>
+    <CommandPlacement guid="guidUnrealSenseCmdSet" id="FindUsages" priority="0x0105">
       <Parent guid="guidUnrealSenseCmdSet" id="EditorContextGroup" />
     </CommandPlacement>
     <CommandPlacement guid="guidUnrealSenseCmdSet" id="GoToUnrealCounterpart" priority="0x0110">

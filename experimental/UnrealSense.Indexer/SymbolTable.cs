@@ -340,6 +340,27 @@ namespace UnrealSense.Indexer
             return fn;
         }
 
+        /// <summary>
+        /// Fills the lazy per-symbol caches (bases, declared types, alias targets) in a fixed order before pass 2. Filled lazily by
+        /// pass 2's threads, a value cut short by a recursion guard was cached as it happened to be computed first: two builds of
+        /// the same sources could differ in a few references.
+        /// </summary>
+        public void PrecomputeTypes()
+        {
+            int n = All.Count;
+            for (int i = 0; i < n; i++) if (All[i].IsClassLike) GetBases(All[i]);
+            for (int i = 0; i < n; i++)
+            {
+                var s = All[i];
+                switch (s.Kind)
+                {
+                    case SymKind.Typedef: if ((s.Flags & DeclFlags.Generated) == 0) ExpandAlias(s, null, 0); break;
+                    case SymKind.Using: ResolveUsingTarget(s); break;
+                    case SymKind.Variable: case SymKind.Function: case SymKind.Enumerator: DeclaredType(s); break;
+                }
+            }
+        }
+
         // ------------------------------------------------------------------ lookup
 
         /// <summary>Name lookup inside one scope (class: with bases). Result: Symbol, List&lt;Symbol&gt; or null.</summary>

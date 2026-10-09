@@ -26,6 +26,8 @@ namespace UnrealSense.Indexer
         {
             var s = new Shard[ShardCount];
             for (int i = 0; i < s.Length; i++) s[i] = new Shard();
+            // id 0 means "anonymous" everywhere: never give it to a real identifier
+            s[0].Strings[0] = ""; s[0].Count = 1;
             return s;
         }
 

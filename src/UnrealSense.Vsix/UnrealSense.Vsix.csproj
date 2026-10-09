@@ -63,7 +63,29 @@
   <!-- Assemblies that Visual Studio already ships: never package our own copies. -->
   <Target Name="ExcludeVsProvidedAssemblies" AfterTargets="GetVsixSourceItems">
     <ItemGroup>
-      <VSIXSourceItem Remove="@(VSIXSourceItem)" Condition="'%(Filename)' == 'Microsoft.VisualStudio.Extensibility.Editor.Contracts' or '%(Filename)' == 'Microsoft.VisualStudio.Linux.ConnectionManager.Store' or '%(Filename)' == 'System.Text.Encodings.Web'" />
+      <VSIXSourceItem Remove="@(VSIXSourceItem)" Condition="!$([System.String]::Copy('%(VSIXSourceItem.VSIXSubPath)').StartsWith('OwnIndexer')) and ('%(Filename)' == 'Microsoft.VisualStudio.Extensibility.Editor.Contracts' or '%(Filename)' == 'Microsoft.VisualStudio.Linux.ConnectionManager.Store' or '%(Filename)' == 'System.Text.Encodings.Web')" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The experimental own C++ indexer (usindex, net8, option UseOwnIndex) ships in OwnIndexer\ as a separate process: the VSIX
+       is net48. Self-contained, so the company PC needs no .NET 8 runtime. Published again only when its sources change. -->
+  <PropertyGroup>
+    <OwnIndexerRoot>$(MSBuildThisFileDirectory)..\..\experimental\</OwnIndexerRoot>
+    <OwnIndexerProject>$(OwnIndexerRoot)UnrealSense.IndexerCli\UnrealSense.IndexerCli.csproj</OwnIndexerProject>
+    <OwnIndexerDir>$(MSBuildThisFileDirectory)obj\OwnIndexer\</OwnIndexerDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <OwnIndexerSource Include="$(OwnIndexerRoot)UnrealSense.Indexer\*.cs;$(OwnIndexerRoot)UnrealSense.IndexerCli\*.cs;$(OwnIndexerRoot)**\*.csproj" Exclude="$(OwnIndexerRoot)**\obj\**;$(OwnIndexerRoot)**\bin\**" />
+  </ItemGroup>
+  <Target Name="PublishOwnIndexer" BeforeTargets="BeforeBuild" Condition="Exists('$(OwnIndexerProject)')" Inputs="@(OwnIndexerSource)" Outputs="$(OwnIndexerDir)usindex.exe">
+    <Exec Command="dotnet publish &quot;$(OwnIndexerProject)&quot; -c Release -r win-x64 --self-contained true -p:PublishTrimmed=false -o &quot;$(OwnIndexerDir.TrimEnd('\'))&quot; --nologo -v q" />
+    <Touch Files="$(OwnIndexerDir)usindex.exe" />
+  </Target>
+  <!-- Added to the package only (not as Content: its runtime's mscorlib/System.* would become reference candidates of this net48 build). -->
+  <Target Name="IncludeOwnIndexer" AfterTargets="GetVsixSourceItems" Condition="Exists('$(OwnIndexerDir)usindex.exe')">
+    <ItemGroup>
+      <OwnIndexerFile Include="$(OwnIndexerDir)**\*" />
+      <VSIXSourceItem Include="@(OwnIndexerFile)" VSIXSubPath="OwnIndexer\%(RecursiveDir)" />
     </ItemGroup>
   </Target>
 

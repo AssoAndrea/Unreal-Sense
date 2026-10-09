@@ -114,7 +114,10 @@ namespace UnrealSense.Extension.Services
                     if (workspace.AssetState == WorkspaceState.Failed)
                         Log.Error("Blueprint index failed", workspace.LastError);
                     if (workspace.State == WorkspaceState.Ready && current == workspace)
+                    {
                         ClangdService.OnWorkspaceReady(workspace);
+                        OwnIndexService.OnWorkspaceReady(workspace);
+                    }
                 }, System.Threading.Tasks.TaskScheduler.Default);
 
                 Changed?.Invoke(workspace, EventArgs.Empty);
@@ -144,6 +147,7 @@ namespace UnrealSense.Extension.Services
                 currentUProject = null;
             }
             System.Threading.Tasks.Task.Run(() => ClangdService.Stop());
+            System.Threading.Tasks.Task.Run(() => OwnIndexService.Stop());
             Changed?.Invoke(null, EventArgs.Empty);
         }
 

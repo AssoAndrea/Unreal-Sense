@@ -25,7 +25,7 @@ namespace UnrealSense.Extension
     [Guid(PackageGuids.UnrealSensePackageString)]
     public sealed class UnrealSensePackage : ToolkitPackage
     {
-        public const string Version = "0.3.15";
+        public const string Version = "0.3.16";
 
         protected override async Task InitializeAsync(CancellationToken cancellationToken, IProgress<ServiceProgressData> progress)
         {

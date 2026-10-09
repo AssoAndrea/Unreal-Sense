@@ -525,9 +525,22 @@ namespace UnrealSense.Indexer
                         if (close == p + 2) isSpecialization = true;
                         var names = new List<int>();
                         ParseTemplateParamNames(p + 2, close, names);
+                        if (sink != null)
+                            // constraints written as macros in the parameter list (UE_REQUIRES(std::is_base_of_v<AActor, T>)): code to resolve
+                            for (int q = p + 2; q < close; q++)
+                                if (T[q].Kind == TK.Ident && IsP(q + 1, '(') && Macros.Find(T[q].Value) != null && Match[q + 1] > q + 1 && Match[q + 1] <= close)
+                                {
+                                    sink.OnSoup(q + 2, Match[q + 1], ctx);
+                                    q = Match[q + 1];
+                                }
                         p = close + 1;
                         // requires-clause
-                        if (IsId(p, K.Requires)) p = SkipRequires(p + 1, end);
+                        if (IsId(p, K.Requires))
+                        {
+                            int r = p + 1;
+                            p = SkipRequires(r, end);
+                            if (sink != null && p > r) sink.OnSoup(r, p, ctx);
+                        }
                         if (p >= end) return;
                         int[] tp = names.ToArray();
                         if (templateParams != null && templateParams.Length > 0)
@@ -674,11 +687,13 @@ namespace UnrealSense.Indexer
                     var mk = Macros.Classify(v);
                     if (mk == MacroKind.FuncDecorative && v != K.UCLASS && v != K.USTRUCT && v != K.UENUM && v != K.UINTERFACE && v != K.UFUNCTION && v != K.UPROPERTY && v != K.UDELEGATE)
                     {
-                        // e.g. UE_DEPRECATED(...) before a declaration: skip and continue with the declaration
+                        // e.g. UE_DEPRECATED(...) before a declaration: skip and continue with the declaration (keeping the
+                        // template parameters of "template<typename T> UE_DEPRECATED(...) void F(T*)")
                         p = After(p + 1);
+                        ContinueAfterDecoration(ref p, end, ctx, templateParams, specialization);
                         return;
                     }
-                    if (mk == MacroKind.FuncDecorative) { p = After(p + 1); return; }
+                    if (mk == MacroKind.FuncDecorative) { p = After(p + 1); ContinueAfterDecoration(ref p, end, ctx, templateParams, specialization); return; }
                     if (mk == MacroKind.FuncOther || IsUnrealDeclMacro(v))
                     {
                         if (HandleDeclMacro(ref p, end, ctx)) return;
@@ -690,11 +705,21 @@ namespace UnrealSense.Indexer
                     if (mk == MacroKind.Decorative || mk == MacroKind.ObjectOther && LooksLikeStatementMacro(p))
                     {
                         p++;
+                        if (mk == MacroKind.Decorative) ContinueAfterDecoration(ref p, end, ctx, templateParams, specialization);
                         return;
                     }
                 }
             }
             ParseSimpleDeclaration(ref p, end, ctx, templateParams, specialization);
+        }
+
+        /// <summary>After a decorative macro inside a template declaration: the rest is the same declaration, with its template parameters.</summary>
+        void ContinueAfterDecoration(ref int p, int end, ScopeCtx ctx, int[] templateParams, bool specialization)
+        {
+            // explicit specializations (template<> API X F<Y>()) keep the previous handling: their "<Y>" is resolved that way
+            if (templateParams == null || templateParams.Length == 0) return;
+            if (p >= end || IsP(p, ';') || IsP(p, '}')) return;
+            ParseDeclarationInner(ref p, end, ctx, templateParams, specialization);
         }
 
         bool LooksLikeStatementMacro(int p)

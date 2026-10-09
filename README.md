@@ -27,6 +27,14 @@ module aliases): check it first when a counter looks wrong.
 
 ### Experimental, off by default
 
+**Own C++ index** (`Use the own C++ index (experimental)` in the options, category "Find Usages (own index, experimental)"):
+Find Usages from UnrealSense's own C++ indexer, written from scratch (no clangd, no compiler). It runs as a separate process
+(`OwnIndexer\usindex.exe`, shipped in the VSIX with its own .NET runtime), indexes the project and the engine headers it
+includes in a few seconds, keeps the index on disk and updates it incrementally after C++ files are saved (only the changed
+files are read again). With the option on, **Find Usages** appears in the editor's context menu and under Extensions ›
+UnrealSense. `Index the whole engine` also indexes every engine and plugin source file (about 100k files). Log lines start
+with `OwnIndex:`. Uses on an object whose type the indexer cannot infer are counted as "not listed" instead of guessed.
+
 A semantic C++ index built with clangd (exact Find Usages, Go to Symbol/File, Go to Definition) is in the code but
 disabled (`Enable semantic C++ index (experimental)` in the options) and its commands are hidden: on large source-built
 engines the first index takes too long.
@@ -53,7 +61,7 @@ src/UnrealSense.Core     netstandard2.0, no VS dependency, unit-tested
 src/UnrealSense.Vsix     VSIX (net48, VSSDK + MEF + Community.VisualStudio.Toolkit)
 tests/                   xUnit tests (unit tests + integration tests against a real UE project)
 tools/UnrealSense.Cli    debugging CLI: dump/parse/assets/analyze...
-experimental/            paused prototype of a C++ usage indexer written from scratch
+experimental/            own C++ indexer written from scratch (usindex: build, serve, scoring against clangd)
 ```
 
 ## Build and debug
@@ -67,6 +75,16 @@ dotnet test tests/UnrealSense.Core.Tests -c Release
 ```powershell
 .\deploy-exp.ps1      # Debug build, clean install into the experimental instance, opens C:\Unreal Project\Gym
 .\build-release.ps1   # Release build + dist\ (checks that the version in the .vsix matches the source manifest)
+```
+
+The VSIX build also publishes the own C++ indexer (`experimental/UnrealSense.IndexerCli`, self-contained win-x64) into
+the package's `OwnIndexer\` folder, again only when its sources changed (the first time it needs the .NET 8 win-x64
+runtime pack from NuGet). To try the indexer on its own:
+
+```powershell
+dotnet build -c Release experimental/UnrealSense.IndexerCli
+experimental\UnrealSense.IndexerCli\bin\Release\net8.0\usindex.exe build "C:\Unreal Project\LyraStarterGame" [--engine]
+experimental\UnrealSense.IndexerCli\bin\Release\net8.0\usindex.exe refs "C:\Unreal Project\LyraStarterGame" <file> <line> <col>
 ```
 
 The version lives in `src/UnrealSense.Vsix/source.extension.vsixmanifest` and in `UnrealSensePackage.Version`; change

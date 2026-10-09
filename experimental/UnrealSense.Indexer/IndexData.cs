@@ -12,9 +12,10 @@ namespace UnrealSense.Indexer
     /// </summary>
     public sealed class IndexData
     {
-        const int Version = 3;
+        const int Version = 4;
         public string ProjectDir, EngineDir;
         public bool Engine;
+        public string BuildId;                // matches the build cache written by the same build
         public string[] Files;
         // symbols
         public string[] SymNames;
@@ -22,6 +23,7 @@ namespace UnrealSense.Indexer
         public uint[] SymFlags;
         public int[] SymParent, SymFile, SymLine, SymCol;
         public int[][] SymOverrides;          // methods this one overrides
+        public string[] SymSigs;              // functions: parameter signature (SymbolTable.SigKey), else null
         // references, sorted by symbol
         public int[] RefStart;                // per symbol: index into Ref* arrays (length = symbols + 1)
         public int[] RefFile, RefLine, RefCol;
@@ -37,12 +39,21 @@ namespace UnrealSense.Indexer
         public static IndexData Create(List<SourceFile> files, SymbolTable table, Dictionary<Symbol, List<Symbol>> overrides,
             List<RefRec>[] refsPerFile, List<UnresolvedRec>[] unresolvedPerFile, string projectDir, string engineDir, bool engine)
         {
+            var d = CreateSymbols(files, table, overrides, projectDir, engineDir, engine);
+            d.SetReferences(refsPerFile, unresolvedPerFile);
+            return d;
+        }
+
+        /// <summary>Files and symbols only; <see cref="SetReferences"/> completes it (the incremental build needs the symbols' keys first).</summary>
+        public static IndexData CreateSymbols(List<SourceFile> files, SymbolTable table, Dictionary<Symbol, List<Symbol>> overrides, string projectDir, string engineDir, bool engine)
+        {
             var d = new IndexData { ProjectDir = projectDir, EngineDir = engineDir, Engine = engine };
             d.Files = files.Select(f => f.Path).ToArray();
             int n = table.All.Count;
             d.SymNames = new string[n]; d.SymKinds = new byte[n]; d.SymFlags = new uint[n];
             d.SymParent = new int[n]; d.SymFile = new int[n]; d.SymLine = new int[n]; d.SymCol = new int[n];
             d.SymOverrides = new int[n][];
+            d.SymSigs = new string[n];
             for (int i = 0; i < n; i++)
             {
                 var s = table.All[i];
@@ -52,11 +63,35 @@ namespace UnrealSense.Indexer
                 d.SymParent[i] = s.Parent?.Id ?? -1;
                 d.SymFile[i] = s.File; d.SymLine[i] = s.Line; d.SymCol[i] = s.Col;
                 if (overrides.TryGetValue(s, out var ov)) d.SymOverrides[i] = ov.Select(x => x.Id).ToArray();
+                d.SymSigs[i] = s.Kind == SymKind.Function ? s.SigKey ?? "" : null;
             }
+            return d;
+        }
+
+        public void SetReferences(List<RefRec>[] refsPerFile, List<UnresolvedRec>[] unresolvedPerFile) =>
+            SetReferences(refsPerFile, unresolvedPerFile, null, null, null, out _, out _);
+
+        /// <summary>
+        /// References and unresolved usages: the fresh ones (per new file id) plus, for an incremental build, the previous index's
+        /// ones in the files it keeps (<paramref name="fileMap"/>: old file id → new id or -1), their symbols mapped through
+        /// <paramref name="oldToNew"/> (-1 = the symbol no longer exists).
+        /// </summary>
+        public void SetReferences(List<RefRec>[] refsPerFile, List<UnresolvedRec>[] unresolvedPerFile, IndexData prev, int[] fileMap, int[] oldToNew, out int kept, out int lost)
+        {
+            var d = this;
+            int n = SymNames.Length;
+            kept = 0; lost = 0;
             // refs: counting sort by symbol
             var count = new int[n + 1];
             for (int f = 0; f < refsPerFile.Length; f++)
                 if (refsPerFile[f] != null) foreach (var r in refsPerFile[f]) count[r.Sym + 1]++;
+            if (prev != null)
+                for (int s = 0; s < oldToNew.Length; s++)
+                {
+                    int ns = oldToNew[s];
+                    for (int k = prev.RefStart[s]; k < prev.RefStart[s + 1]; k++)
+                        if (fileMap[prev.RefFile[k]] >= 0) { if (ns >= 0) { count[ns + 1]++; kept++; } else lost++; }
+                }
             for (int i = 0; i < n; i++) count[i + 1] += count[i];
             d.RefStart = (int[])count.Clone();
             int total = count[n];
@@ -71,24 +106,52 @@ namespace UnrealSense.Indexer
                     d.RefFile[k] = f; d.RefLine[k] = r.Line; d.RefCol[k] = r.Col; d.RefKind[k] = (byte)r.Kind;
                 }
             }
+            if (prev != null)
+                for (int s = 0; s < oldToNew.Length; s++)
+                {
+                    int ns = oldToNew[s];
+                    if (ns < 0) continue;
+                    for (int k = prev.RefStart[s]; k < prev.RefStart[s + 1]; k++)
+                    {
+                        int f = fileMap[prev.RefFile[k]];
+                        if (f < 0) continue;
+                        int q = pos[ns]++;
+                        d.RefFile[q] = f; d.RefLine[q] = prev.RefLine[k]; d.RefCol[q] = prev.RefCol[k]; d.RefKind[q] = prev.RefKind[k];
+                    }
+                }
             // unresolved
-            var nameIds = new Dictionary<int, int>();
+            var nameIds = new Dictionary<string, int>(StringComparer.Ordinal);
             var names = new List<string>();
+            int NameId(string name)
+            {
+                if (!nameIds.TryGetValue(name, out int id)) { id = names.Count; names.Add(name); nameIds[name] = id; }
+                return id;
+            }
             var un = new List<(int, int, int, int, byte)>();
             for (int f = 0; f < unresolvedPerFile.Length; f++)
             {
                 if (unresolvedPerFile[f] == null) continue;
-                foreach (var u in unresolvedPerFile[f])
-                {
-                    if (!nameIds.TryGetValue(u.Name, out int id)) { id = names.Count; names.Add(Names.Get(u.Name)); nameIds[u.Name] = id; }
-                    un.Add((id, f, u.Line, u.Col, u.Kind));
-                }
+                foreach (var u in unresolvedPerFile[f]) un.Add((NameId(Names.Get(u.Name)), f, u.Line, u.Col, u.Kind));
             }
+            if (prev != null)
+                for (int k = 0; k < prev.UnName.Length; k++)
+                {
+                    int f = fileMap[prev.UnFile[k]];
+                    if (f >= 0) un.Add((NameId(prev.UnresolvedNames[prev.UnName[k]]), f, prev.UnLine[k], prev.UnCol[k], prev.UnKind[k]));
+                }
             un.Sort();
             d.UnresolvedNames = names.ToArray();
             d.UnName = un.Select(x => x.Item1).ToArray(); d.UnFile = un.Select(x => x.Item2).ToArray();
             d.UnLine = un.Select(x => x.Item3).ToArray(); d.UnCol = un.Select(x => x.Item4).ToArray(); d.UnKind = un.Select(x => x.Item5).ToArray();
-            return d;
+        }
+
+        /// <summary>The same symbols in the same order (the merge of unchanged declarations): ids can be reused as they are.</summary>
+        public bool SameSymbols(IndexData other)
+        {
+            if (other.SymNames.Length != SymNames.Length) return false;
+            for (int i = 0; i < SymNames.Length; i++)
+                if (SymKinds[i] != other.SymKinds[i] || SymParent[i] != other.SymParent[i] || SymNames[i] != other.SymNames[i] || SymSigs[i] != other.SymSigs[i]) return false;
+            return true;
         }
 
         // ------------------------------------------------------------------ persistence
@@ -103,7 +166,7 @@ namespace UnrealSense.Indexer
             using (var z = new System.IO.Compression.BrotliStream(fs, System.IO.Compression.CompressionLevel.Fastest))
             using (var w = new BinaryWriter(new BufferedStream(z, 1 << 20), Encoding.UTF8))
             {
-                w.Write(Version); w.Write(ProjectDir); w.Write(EngineDir); w.Write(Engine);
+                w.Write(Version); w.Write(ProjectDir); w.Write(EngineDir); w.Write(Engine); w.Write(BuildId ?? "");
                 WriteStrings(w, Files);
                 WriteStrings(w, SymNames);
                 w.Write(SymKinds.Length); w.Write(SymKinds);
@@ -111,6 +174,7 @@ namespace UnrealSense.Indexer
                 int ov = SymOverrides.Count(x => x != null);
                 w.Write(ov);
                 for (int i = 0; i < SymOverrides.Length; i++) if (SymOverrides[i] != null) { w.Write(i); WriteInts(w, SymOverrides[i]); }
+                for (int i = 0; i < SymSigs.Length; i++) { w.Write(SymSigs[i] != null); if (SymSigs[i] != null) w.Write(SymSigs[i]); }
                 WriteInts(w, RefStart); WriteInts(w, RefFile); WriteInts(w, RefLine); WriteInts(w, RefCol); w.Write(RefKind.Length); w.Write(RefKind);
                 WriteStrings(w, UnresolvedNames);
                 WriteInts(w, UnName); WriteInts(w, UnFile); WriteInts(w, UnLine); WriteInts(w, UnCol); w.Write(UnKind.Length); w.Write(UnKind);
@@ -124,7 +188,7 @@ namespace UnrealSense.Indexer
             using var z = new System.IO.Compression.BrotliStream(fs, System.IO.Compression.CompressionMode.Decompress);
             using var r = new BinaryReader(new BufferedStream(z, 1 << 20), Encoding.UTF8);
             if (r.ReadInt32() != Version) throw new InvalidDataException("index version mismatch: rebuild");
-            var d = new IndexData { ProjectDir = r.ReadString(), EngineDir = r.ReadString(), Engine = r.ReadBoolean() };
+            var d = new IndexData { ProjectDir = r.ReadString(), EngineDir = r.ReadString(), Engine = r.ReadBoolean(), BuildId = r.ReadString() };
             d.Files = ReadStrings(r);
             d.SymNames = ReadStrings(r);
             d.SymKinds = r.ReadBytes(r.ReadInt32());
@@ -132,6 +196,8 @@ namespace UnrealSense.Indexer
             d.SymOverrides = new int[d.SymNames.Length][];
             int ov = r.ReadInt32();
             for (int i = 0; i < ov; i++) { int s = r.ReadInt32(); d.SymOverrides[s] = ReadInts(r); }
+            d.SymSigs = new string[d.SymNames.Length];
+            for (int i = 0; i < d.SymSigs.Length; i++) if (r.ReadBoolean()) d.SymSigs[i] = r.ReadString();
             d.RefStart = ReadInts(r); d.RefFile = ReadInts(r); d.RefLine = ReadInts(r); d.RefCol = ReadInts(r); d.RefKind = r.ReadBytes(r.ReadInt32());
             d.UnresolvedNames = ReadStrings(r);
             d.UnName = ReadInts(r); d.UnFile = ReadInts(r); d.UnLine = ReadInts(r); d.UnCol = ReadInts(r); d.UnKind = r.ReadBytes(r.ReadInt32());
@@ -153,6 +219,32 @@ namespace UnrealSense.Indexer
             int read = 0;
             while (read < bytes.Length) { int n = r.Read(bytes.Slice(read)); if (n <= 0) break; read += n; }
             return a;
+        }
+
+        /// <summary>
+        /// A key per symbol that survives a rebuild (ids do not): parent key / kind : name (signature). Anonymous symbols add their
+        /// file (not the line, which moves with edits); remaining clashes are numbered in id order.
+        /// </summary>
+        public string[] StableKeys()
+        {
+            int n = SymNames.Length;
+            var keys = new string[n];
+            var seen = new Dictionary<string, int>();
+            string Key(int i)
+            {
+                if (keys[i] != null) return keys[i];
+                var sb = new StringBuilder();
+                int p = SymParent[i];
+                if (p >= 0 && p != i) sb.Append(Key(p)).Append('/');
+                sb.Append(SymKinds[i]).Append(':').Append(SymNames[i]);
+                if (SymSigs[i] != null) sb.Append('(').Append(SymSigs[i]).Append(')');
+                if (SymNames[i].Length == 0 && SymFile[i] >= 0) sb.Append('@').Append(Files[SymFile[i]]);
+                var k = sb.ToString();
+                if (seen.TryGetValue(k, out int c)) { seen[k] = c + 1; k += "#" + c; } else seen[k] = 1;
+                return keys[i] = k;
+            }
+            for (int i = 0; i < n; i++) Key(i);
+            return keys;
         }
 
         // ------------------------------------------------------------------ queries
@@ -184,10 +276,6 @@ namespace UnrealSense.Indexer
                     if (pref < bestKind) { best = s; bestKind = pref; }
                 }
             }
-            // on the name of a constructor's own declaration clangd answers with the class (its hover says "struct X" and
-            // its references are the type's): the constructor has no references of its own in clangd's index
-            if (best >= 0 && (SymFlags[best] & (uint)DeclFlags.Ctor) != 0 && SymFile[best] == f && SymLine[best] == line && SymParent[best] > 0)
-                best = SymParent[best];
             return best;
         }
 

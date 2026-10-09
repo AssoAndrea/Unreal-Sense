@@ -87,6 +87,47 @@ namespace UnrealSense.IndexerCli
             return 0;
         }
 
+        /// <summary>
+        /// The same queries (same positions) answered again by another clangd index: keeps a closed set closed while the oracle
+        /// improves. Prints only totals. "clangdFiles" is recomputed from the new index when the source has it.
+        /// </summary>
+        public static int Requery(string inPath, string dbDir, string outPath, int jobs)
+        {
+            var src = JObject.Parse(File.ReadAllText(inPath));
+            var project = (string)src["project"];
+            using var session = new ClangdSession(dbDir, project, jobs);
+            var results = new JArray();
+            int before = 0, after = 0, failed = 0;
+            foreach (JObject r in src["results"])
+            {
+                var file = (string)r["file"];
+                int line = (int)r["line"], col = (int)r["col"];
+                before += ((JArray)r["refs"]).Count;
+                var res = session.Query(file, line, col);
+                if (res == null) { failed++; results.Add(r); continue; }
+                after += res.Refs.Count;
+                results.Add(ToJson((string)r["id"], file, line, col, res));
+            }
+            var output = new JObject();
+            foreach (var p in src.Properties()) if (p.Name != "results" && p.Name != "clangdFiles") output[p.Name] = p.Value;
+            if (src["clangdFiles"] != null)
+            {
+                var idxDir = Path.Combine(dbDir, ".cache", "clangd", "index");
+                var names = Directory.GetFiles(idxDir, "*.idx").Select(f =>
+                {
+                    var n = Path.GetFileNameWithoutExtension(f);
+                    int dot = n.LastIndexOf('.');
+                    return dot > 0 ? n.Substring(0, dot) : n;
+                }).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
+                output["clangdFiles"] = new JArray(names);
+            }
+            output["oracleIndex"] = dbDir;
+            output["results"] = results;
+            File.WriteAllText(outPath, output.ToString());
+            Console.WriteLine($"{results.Count} queries re-asked: {before} references before, {after} now ({failed} failed)");
+            return failed == 0 ? 0 : 1;
+        }
+
         public static JObject ToJson(string id, string file, int line, int col, OracleResult r)
         {
             var arr = new JArray();

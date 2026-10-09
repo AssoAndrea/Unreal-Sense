@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Community.VisualStudio.Toolkit;
 using Microsoft.VisualStudio.Shell;
 using UnrealSense.Extension.GoTo;
+using UnrealSense.Extension.Options;
 using UnrealSense.Extension.Services;
 using UnrealSense.Extension.ToolWindows;
 
@@ -37,6 +38,12 @@ namespace UnrealSense.Extension.Commands
     internal sealed class FindUsagesCommand : BaseCommand<FindUsagesCommand>
     {
         static CancellationTokenSource running;
+
+        protected override void BeforeQueryStatus(EventArgs e)
+        {
+            ThreadHelper.ThrowIfNotOnUIThread();
+            Command.Visible = General.Instance.UseOwnIndex && WorkspaceService.Current?.Project != null;
+        }
 
         protected override async Task ExecuteAsync(OleMenuCmdEventArgs e)
         {

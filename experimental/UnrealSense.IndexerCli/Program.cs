@@ -20,8 +20,12 @@ namespace UnrealSense.IndexerCli
             string indexOverride = opts.FirstOrDefault(o => o.StartsWith("--index="))?.Substring(8);
             switch (pos[0])
             {
+                case "serve": return Serve.Run(pos[1], opts.Contains("--engine"), threads, IndexPath(pos[1], opts.Contains("--engine"), indexOverride));
+                case "reoracle": return Oracle.Requery(pos[1], pos[2], pos[3], pos.Count > 4 ? int.Parse(pos[4]) : 8);
                 case "oracle": return Oracle.Run(pos[1], pos[2], pos[3], pos.Count > 4 ? int.Parse(pos[4]) : 4);
-                case "build": return Build(pos[1], opts.Contains("--engine"), threads, indexOverride);
+                case "build": return Build(pos[1], opts.Contains("--engine"), threads, indexOverride, opts.Contains("--full"));
+                case "compare": return Compare(IndexData.Load(pos[1]), IndexData.Load(pos[2]));
+                case "verify-incremental": return VerifyIncremental(pos[1], opts.Contains("--engine"), threads, pos.Count > 2 ? int.Parse(pos[2]) : 20);
                 case "refs": return Refs(pos[1], pos[2], int.Parse(pos[3]), int.Parse(pos[4]), opts.Contains("--engine"), indexOverride);
                 case "score": return Score(pos[1], pos.Count > 2 ? pos[2] : null, opts.Contains("--engine"), indexOverride, opts.FirstOrDefault(o => o.StartsWith("--details="))?.Substring(10), opts.FirstOrDefault(o => o.StartsWith("--scope="))?.Substring(8));
                 case "heldout":
@@ -89,14 +93,14 @@ namespace UnrealSense.IndexerCli
             return Path.Combine(IndexData.DefaultDirectory(name), engine ? "index-engine.bin" : "index-project.bin");
         }
 
-        static int Build(string uproject, bool engine, int threads, string indexOverride)
+        static int Build(string uproject, bool engine, int threads, string indexOverride, bool full)
         {
             var builder = new IndexBuilder();
             var clock = Stopwatch.StartNew();
-            var data = builder.Build(new BuildOptions { UProject = uproject, Engine = engine, Threads = threads, Log = m => Console.WriteLine($"[{clock.Elapsed.TotalSeconds,6:F1}s] {m}") }, out var stats);
-            var sw = Stopwatch.StartNew();
             var path = IndexPath(uproject, engine, indexOverride);
-            long size = data.Save(path);
+            var data = builder.Build(new BuildOptions { UProject = uproject, Engine = engine, Threads = threads, IndexPath = path, Full = full, Log = m => Console.WriteLine($"[{clock.Elapsed.TotalSeconds,6:F1}s] {m}") }, out var stats);
+            var sw = Stopwatch.StartNew();
+            long size = stats.Unchanged ? new FileInfo(path).Length : data.Save(path);
             stats.Save = sw.Elapsed.TotalSeconds;
             var proc = Process.GetCurrentProcess();
             Console.WriteLine();
@@ -106,10 +110,57 @@ namespace UnrealSense.IndexerCli
             long accesses = stats.ResolvedMember + stats.UnresolvedMemberUnknownRecv + stats.UnresolvedMemberNotFound;
             Console.WriteLine($"member accesses (. -> ::): {accesses:N0}, resolved {100.0 * stats.ResolvedMember / Math.Max(1, accesses):F1}%, unknown receiver {100.0 * stats.UnresolvedMemberUnknownRecv / Math.Max(1, accesses):F1}%, member not found {100.0 * stats.UnresolvedMemberNotFound / Math.Max(1, accesses):F1}%");
             double total = clock.Elapsed.TotalSeconds;
-            Console.WriteLine($"time: total {total:F1}s = discover {stats.Discover:F1} + phase0 {stats.Phase0:F1} + pass1 {stats.Pass1:F1} + merge {stats.Merge:F1} + pass2 {stats.Pass2:F1} + save {stats.Save:F1}");
+            Console.WriteLine($"time: total {total:F1}s = discover {stats.Discover:F1} + phase0 {stats.Phase0:F1} + pass1 {stats.Pass1:F1} + merge {stats.Merge:F1} + pass2 {stats.Pass2:F1} + cache {stats.CacheSave:F1} + save {stats.Save:F1}" + (stats.Incremental ? $" (incremental, {stats.ChangedFiles:N0} files changed)" : " (full)"));
             Console.WriteLine($"throughput: {stats.Files / total:F0} files/s, {stats.Bytes / 1048576.0 / total:F1} MB/s; threads {stats.Threads}; CPU {proc.TotalProcessorTime.TotalSeconds:F0}s ({proc.TotalProcessorTime.TotalSeconds / total:F1} busy cores)");
             Console.WriteLine($"memory: peak working set {stats.PeakWorkingSet / 1073741824.0:F2} GB, managed heap {stats.ManagedHeap / 1073741824.0:F2} GB");
             return 0;
+        }
+
+        /// <summary>
+        /// Incremental build == full build: a full build, then an incremental one with <paramref name="touched"/> files (fixed seed)
+        /// treated as changed; both indexes must hold the same (symbol key, file, line, column, kind) references and unresolved usages.
+        /// Works on copies of the index next to the real one.
+        /// </summary>
+        static int VerifyIncremental(string uproject, bool engine, int threads, int touched)
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "usindex-verify");
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, engine ? "index-engine.bin" : "index-project.bin");
+            var clock = Stopwatch.StartNew();
+            Action<string> log = m => Console.WriteLine($"[{clock.Elapsed.TotalSeconds,6:F1}s] {m}");
+            var full = new IndexBuilder().Build(new BuildOptions { UProject = uproject, Engine = engine, Threads = threads, IndexPath = path, Full = true, Log = log }, out _);
+            full.Save(path);
+            var rnd = new Random(1);
+            var pick = full.Files.Where(f => !f.Contains("/Intermediate/")).OrderBy(_ => rnd.Next()).Take(touched).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            Console.WriteLine($"touching {pick.Count} files: " + string.Join(", ", pick.Take(8).Select(Path.GetFileName)) + (pick.Count > 8 ? ", ..." : ""));
+            IndexBuilder.ForceChanged = pick;
+            var inc = new IndexBuilder().Build(new BuildOptions { UProject = uproject, Engine = engine, Threads = threads, IndexPath = path, Log = log }, out var st);
+            IndexBuilder.ForceChanged = null;
+            if (!st.Incremental) { Console.WriteLine("FAIL: the second build was not incremental"); return 1; }
+            return Compare(full, inc);
+        }
+
+        static HashSet<string> Entries(IndexData d)
+        {
+            var keys = d.StableKeys();
+            var s = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = 0; i < keys.Length; i++)
+                for (int k = d.RefStart[i]; k < d.RefStart[i + 1]; k++) s.Add($"{keys[i]} {d.Files[d.RefFile[k]]}:{d.RefLine[k]}:{d.RefCol[k]} {d.RefKind[k]}");
+            for (int k = 0; k < d.UnName.Length; k++) s.Add($"? {d.UnresolvedNames[d.UnName[k]]} {d.Files[d.UnFile[k]]}:{d.UnLine[k]}:{d.UnCol[k]} {d.UnKind[k]}");
+            return s;
+        }
+
+        /// <summary>Same references and unresolved usages (by stable symbol key) in two indexes: 0 if identical.</summary>
+        static int Compare(IndexData full, IndexData inc)
+        {
+            var a = Entries(full); var b = Entries(inc);
+            var missing = a.Where(x => !b.Contains(x)).ToList();
+            var extra = b.Where(x => !a.Contains(x)).ToList();
+            Console.WriteLine($"first: {a.Count:N0} entries, {full.SymbolCount:N0} symbols; second: {b.Count:N0} entries, {inc.SymbolCount:N0} symbols");
+            foreach (var x in missing.Take(15)) Console.WriteLine("  MISSING " + x);
+            foreach (var x in extra.Take(15)) Console.WriteLine("  EXTRA   " + x);
+            Console.WriteLine(missing.Count == 0 && extra.Count == 0 ? "OK: identical" : $"FAIL: {missing.Count:N0} missing, {extra.Count:N0} extra");
+            return missing.Count == 0 && extra.Count == 0 ? 0 : 1;
         }
 
         static int Refs(string uproject, string file, int line, int col, bool engine, string indexOverride)

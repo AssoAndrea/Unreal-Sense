@@ -340,6 +340,13 @@
         <td>Unreal project</td>
         <td>Da impostare solo se UnrealSense apre il progetto sbagliato (capita con soluzioni che ne contengono più di uno).</td>
       </tr>
+      <tr>
+        <td>Use the own C++ index (experimental)</td>
+        <td>Sperimentale, spenta di default. Accende <b>Find Usages</b> (menu contestuale dell'editor e Extensions › UnrealSense):
+          trova dove un simbolo C++ è usato con un indice scritto da noi, senza clangd. La prima volta servono pochi secondi;
+          poi l'indice resta su disco e dopo ogni salvataggio di un file C++ rilegge solo i file cambiati.
+          <i>Index the whole engine</i> aggiunge tutti i sorgenti dell'engine (circa 100.000 file).</td>
+      </tr>
     </table>
   </div>
 

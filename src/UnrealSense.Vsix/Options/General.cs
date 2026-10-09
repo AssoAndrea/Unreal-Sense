@@ -49,6 +49,18 @@ namespace UnrealSense.Extension.Options
         [DefaultValue(true)]
         public bool ShowInErrorList { get; set; } = true;
 
+        [Category("Find Usages (own index, experimental)")]
+        [DisplayName("Use the own C++ index (experimental)")]
+        [Description("Find Usages from UnrealSense's own C++ indexer (an external process, no clangd): built in seconds, updated incrementally when C++ files are saved. Shows the Find Usages command. Off by default.")]
+        [DefaultValue(false)]
+        public bool UseOwnIndex { get; set; } = false;
+
+        [Category("Find Usages (own index, experimental)")]
+        [DisplayName("Index the whole engine")]
+        [Description("Also index every engine and plugin source file (about 100k files, 4 GB of memory while building), not only the engine headers the project includes.")]
+        [DefaultValue(false)]
+        public bool OwnIndexEngine { get; set; } = false;
+
         [Category("Find Usages (clangd)")]
         [DisplayName("Enable semantic C++ index (experimental)")]
         [Description("Run clangd with a background index of the project and engine, so Find Usages resolves the real symbol (pippo->Get() only finds the Get of pippo's class). Off by default: indexing a large engine takes long. When off, Find Usages shows whole-word text matches plus Blueprint usages.")]

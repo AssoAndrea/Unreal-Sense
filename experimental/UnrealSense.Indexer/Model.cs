@@ -125,8 +125,8 @@ namespace UnrealSense.Indexer
         public int File = -1, Line, Col;            // first declaration
         public bool HasDefinition;
         public string SigKey;
-        public List<Symbol> AnonymousChildren;
-        public List<Symbol> Specializations;        // explicit/partial specializations of this class template      // anonymous structs/unions/namespaces whose members are visible here
+        public List<Symbol> AnonymousChildren;      // anonymous structs/unions/namespaces whose members are visible here
+        public List<Symbol> Specializations;        // explicit/partial specializations of this class template
 
         // caches (benign races: computed values are idempotent)
         public TypeInfo[] ResolvedBases;

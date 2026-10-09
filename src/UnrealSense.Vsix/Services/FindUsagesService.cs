@@ -29,6 +29,7 @@ namespace UnrealSense.Extension.Services
         public string Title { get; set; }
         public string Symbol { get; set; }
         public bool IsSemantic { get; set; }
+        public string Source { get; set; }   // shown in the summary; null = clangd or text search
         public string Warning { get; set; }
         public List<CodeUsage> Code { get; } = new List<CodeUsage>();
         public List<AssetUsage> Blueprints { get; } = new List<AssetUsage>();
@@ -55,7 +56,37 @@ namespace UnrealSense.Extension.Services
             var workspace = WorkspaceService.GetForFile(filePath);
             var client = ClangdService.Client;
 
-            if (client != null && client.State != ClangdState.Failed && client.State != ClangdState.Stopped)
+            var own = General.Instance.UseOwnIndex ? await OwnIndexService.FindAsync(filePath, line, wordStart, cancellationToken).ConfigureAwait(false) : null;
+            if (own != null && own.Symbol != null)
+            {
+                results.IsSemantic = true;
+                results.Source = "own index (experimental)";
+                results.Title = $"{own.Kind.ToLowerInvariant()} {own.Symbol}";
+                var fileCache = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+                if (File.Exists(filePath) && File.ReadAllText(filePath) != documentText)
+                    results.Warning = "The document has unsaved changes: the own index reflects the saved files.";
+                int len = Math.Max(1, (own.Name ?? word).Length);
+                foreach (var u in own.Usages)
+                {
+                    var text = LineOf(fileCache, u.FilePath, u.Line);
+                    var kind = ReferenceClassifier.Classify(u.FilePath, text, u.Column, u.Column + len, u.Kind == "Decl" || u.Kind == "Def");
+                    if (kind == ReferenceKind.Generated && !General.Instance.ShowGeneratedReferences) continue;
+                    results.Code.Add(new CodeUsage { FilePath = u.FilePath, Line = u.Line, Column = u.Column, Length = len, LineText = text, Kind = kind });
+                }
+                if (own.Uncertain.Count > 0)
+                    results.Warning = (results.Warning == null ? "" : results.Warning + " ") +
+                        $"{own.Uncertain.Count} more use(s) of the name '{own.Name}' on an object whose type could not be inferred are not listed.";
+                Log.Write($"Find Usages '{word}' (own index): {results.Code.Count} usages, {own.Uncertain.Count} uncertain, {sw.Elapsed.TotalMilliseconds:F0} ms");
+                if (workspace?.Assets != null)
+                    foreach (var u in own.Usages.Where(x => x.Kind == "Decl" || x.Kind == "Def"))
+                    {
+                        var symbol = ResolveReflected(workspace, new SourceLocation { FilePath = u.FilePath, Line = u.Line, Column = u.Column });
+                        if (symbol == null) continue;
+                        results.Blueprints.AddRange(symbol.Member != null ? workspace.FindUsages(symbol.Member, symbol.DeclaringFile) : workspace.FindUsages(symbol.Type, symbol.DeclaringFile));
+                        break;
+                    }
+            }
+            else if (client != null && client.State != ClangdState.Failed && client.State != ClangdState.Stopped)
             {
                 bool wasOpen = client.IsOpen(filePath);
                 await client.SyncDocumentAsync(filePath, documentText).ConfigureAwait(false);

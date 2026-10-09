@@ -12,7 +12,8 @@ namespace UnrealSense.Indexer
         public bool Variadic;
         public Token[] Body = Array.Empty<Token>();   // Number tokens: Value = parsed integer (clamped)
         public bool Ambiguous;                        // defined differently in different files
-        public bool IsDefault;                        // inside "#ifndef NAME" / "#if !defined(NAME)": a fallback another header may override
+        public bool IsDefault;
+        public string Origin;                         // path of the file that defines it (set by the index builder)                        // inside "#ifndef NAME" / "#if !defined(NAME)": a fallback another header may override
         public string BodyKey;                        // for comparing definitions
         public int Kind = -1;                         // cached MacroKind (see DeclParser)
 
@@ -62,7 +63,7 @@ namespace UnrealSense.Indexer
         public List<string> Includes;
         public List<MacroDef> Defines;                             // active #defines (for the global table)
         public HashSet<int> Undefs;
-        public HashSet<int> UnknownInConditions;                   // identifiers an #if/#ifdef could not find (phase 0 only)
+        public HashSet<int> UnknownInConditions;                   // identifiers the #if/#ifdef conditions read (phase 0 only)
         public List<(string Include, Dictionary<int, MacroDef> Macros)> IncludeContexts;                                // names #undef'd in this file (file-scoped helper macros)
         public int Lines;
     }
@@ -93,12 +94,14 @@ namespace UnrealSense.Indexer
 
         HashSet<int> unknown;
 
-        /// <summary>Find for a condition: phase 0 remembers what was missing (the global table may define it later).</summary>
+        /// <summary>
+        /// Find for a condition: phase 0 remembers every name a condition read, found or not. The directives are evaluated again
+        /// when the global value of one of them changes (until a fixed point), so a full and an incremental build agree.
+        /// </summary>
         MacroDef FindNoting(int name)
         {
-            var m = Find(name);
-            if (m == null) unknown?.Add(name);
-            return m;
+            unknown?.Add(name);
+            return Find(name);
         }
 
         static int NotDefinedName(List<Token> dir)
