@@ -29,7 +29,7 @@ module aliases): check it first when a counter looks wrong.
 
 A semantic C++ index built with clangd (exact Find Usages, Go to Symbol/File, Go to Definition) is in the code but
 disabled (`Enable semantic C++ index (experimental)` in the options) and its commands are hidden: on large source-built
-engines the first index takes too long. See `HANDOFF.md` for what was measured and fixed.
+engines the first index takes too long.
 
 ## Installing and updating
 
@@ -55,8 +55,6 @@ tests/                   xUnit tests (unit tests + integration tests against a r
 tools/UnrealSense.Cli    debugging CLI: dump/parse/assets/analyze...
 experimental/            paused prototype of a C++ usage indexer written from scratch
 ```
-
-`CLAUDE.md` has the conventions and the step-by-step for adding a feature.
 
 ## Build and debug
 

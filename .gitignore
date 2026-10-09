@@ -12,3 +12,7 @@ dist/
 # Local, private: company PC notes and Claude Code local settings
 CLAUDE.local.md
 .claude/settings.local.json
+
+# Markdown notes stay local; only the README is published
+*.md
+!README.md
