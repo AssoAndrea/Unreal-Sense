@@ -15,6 +15,8 @@ namespace UnrealSense.Cli
     {
         static int Main(string[] args)
         {
+            var cacheOverride = Environment.GetEnvironmentVariable("UNREALSENSE_CACHE");
+            if (!string.IsNullOrEmpty(cacheOverride)) Clang.CompileDatabase.CacheRoot = cacheOverride;
             if (args.Length < 2)
             {
                 Console.WriteLine("usage: unrealsense dump <file.uasset>");
@@ -39,8 +41,10 @@ namespace UnrealSense.Cli
                 {
                     // unity <compile_commands.files.json> <outDir> <maxFiles> [maxKB]: unity database with a chosen group size
                     Directory.CreateDirectory(args[2]);
+                    var maps = new Clang.HeaderMaps(Path.Combine(args[2], Clang.HeaderMaps.FolderName));
                     var stats = Clang.CompileDatabase.BuildUnity(args[1], Path.Combine(args[2], "compile_commands.json"), Path.Combine(args[2], "unity"), null,
-                        maxFiles: int.Parse(args[3]), maxBytes: (args.Length > 4 ? long.Parse(args[4]) : 1024) * 1024);
+                        maxFiles: int.Parse(args[3]), maxBytes: (args.Length > 4 ? long.Parse(args[4]) : 1024) * 1024, headerMaps: maps);
+                    maps.SaveManifest();
                     Console.WriteLine(stats.ToString().Split('\n')[0]);
                     return 0;
                 }
@@ -410,19 +414,30 @@ namespace UnrealSense.Cli
             // clangd reports several begin/end cycles: done after 30 s without indexing.
             var quiet = Stopwatch.StartNew();
             var cpuAtEnd = TimeSpan.Zero;
+            ulong cyclesAtEnd = 0;
+            int lastMinute = 0;
             while (quiet.Elapsed < TimeSpan.FromSeconds(30) && clock.Elapsed < TimeSpan.FromHours(4))
             {
-                if (clangd.State == Clang.ClangdState.Indexing) { quiet.Restart(); cpuAtEnd = clangd.CpuTime; }
+                if (clangd.State == Clang.ClangdState.Indexing) { quiet.Restart(); cpuAtEnd = clangd.CpuTime; cyclesAtEnd = clangd.CpuCycles; }
                 peak = Math.Max(peak, clangd.MemoryBytes);
+                if ((int)clock.Elapsed.TotalMinutes > lastMinute)
+                {
+                    lastMinute = (int)clock.Elapsed.TotalMinutes;
+                    Console.WriteLine($"[{clock.Elapsed.TotalSeconds,7:F1}s] clangd {clangd.MemoryBytes / (1024.0 * 1024 * 1024):F1} GB, cpu {clangd.CpuCycles / TscHz():F0}s (cycles)");
+                }
                 System.Threading.Thread.Sleep(250);
             }
             // CPU use: how many cores clangd kept busy on average while indexing (ideal = threads).
             double busyCores = lastEnd > 0 ? cpuAtEnd.TotalSeconds / lastEnd : 0;
+            double cycleSeconds = cyclesAtEnd / TscHz();
             Console.WriteLine($"indexed {units} translation units with {clangd.Jobs} threads in {lastEnd:F1}s " +
                               $"({(lastEnd > 0 ? units * 60 / lastEnd : 0):F1} units/min), CPU {cpuAtEnd.TotalSeconds:F0}s = {busyCores:F1} busy cores on average, " +
+                              $"CPU by cycles {cycleSeconds:F0}s = {(lastEnd > 0 ? cycleSeconds / lastEnd : 0):F1} busy cores, " +
                               $"peak clangd memory {peak / (1024.0 * 1024 * 1024):F1} GB, {clangd.UnitsWithErrors} unit(s) with compile errors");
             return 0;
         }
+
+        static double TscHz() => Clang.ClangdClient.CycleRateHz;
 
         /// <summary>refs &lt;project&gt; &lt;file&gt; &lt;line&gt; &lt;column&gt; [compile-commands-dir] [jobs]</summary>
         static int Refs(string projectPath, string file, int line, int column, string dbDirOverride = null, int jobs = 0)

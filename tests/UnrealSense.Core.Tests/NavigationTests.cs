@@ -320,6 +320,96 @@ static int32 GCounter = 0;
         }
 
         [Fact]
+        public void WritesIndexFixupsOnlyForAngelScriptEngines()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "us-fixups-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var engine = Path.Combine(root, "Engine");
+                var coreNative = Path.Combine(engine, "Source", "Runtime", "CoreUObject", "Public", "UObject", "CoreNative.h");
+                Directory.CreateDirectory(Path.GetDirectoryName(coreNative));
+                var output = Path.Combine(root, "db");
+                File.WriteAllText(coreNative,
+                    "#define ERASE_METHOD_PTR(c, m, p, r) ASAutoCaller::GetReflectedFunctionPointers(&c::m)\n#define ERASE_NO_FUNCTION() {}\n");
+
+                var path = CompileDatabase.WriteIndexFixups(output, engine);
+                Assert.Equal(Path.Combine(output, CompileDatabase.FixupsFile), path);
+                Assert.Contains("#define ERASE_METHOD_PTR(c, m, p, r) ((void)static_cast<r(c::*)p>(&c::m), ERASE_NO_FUNCTION())", File.ReadAllText(path));
+
+                // A stock engine needs none: no file, and a stale one from an earlier engine is removed.
+                File.WriteAllText(coreNative, "#pragma once\n");
+                Assert.Null(CompileDatabase.WriteIndexFixups(output, engine));
+                Assert.False(File.Exists(path));
+                Assert.Null(CompileDatabase.WriteIndexFixups(output, null));
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        }
+
+        [Fact]
+        public void ForcesIndexFixupsAfterThePrecompiledHeader()
+        {
+            var root = Path.Combine(Path.GetTempPath(), "us-fixupsdb-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var source = Path.Combine(root, "Game", "Source", "Game");
+                Directory.CreateDirectory(Path.Combine(source, "Private"));
+                File.WriteAllText(Path.Combine(source, "Game.Build.cs"), "class X : ModuleRules { }");
+                var entries = new Newtonsoft.Json.Linq.JArray();
+                foreach (var name in new[] { "A.cpp", "B.cpp", "C.c", "NoPch.cpp" })
+                {
+                    var file = Path.Combine(source, "Private", name).Replace('\\', '/');
+                    File.WriteAllText(file, "int x;");
+                    entries.Add(new Newtonsoft.Json.Linq.JObject
+                    {
+                        ["directory"] = root.Replace('\\', '/'),
+                        ["file"] = file,
+                        ["arguments"] = new Newtonsoft.Json.Linq.JArray("cl.exe", file, "/IGame/Public", "/FIGame/Definitions.h"),
+                    });
+                }
+                var raw = Path.Combine(root, "raw.json");
+                File.WriteAllText(raw, entries.ToString());
+                var files = Path.Combine(root, "db", "files.json");
+                Directory.CreateDirectory(Path.GetDirectoryName(files));
+                var fixups = Path.Combine(root, "db", CompileDatabase.FixupsFile).Replace('\\', '/');
+                const string pch = "C:/UE/Engine/SharedPCH.Engine.h";
+                CompileDatabase.Sanitize(raw, new[] { new CompileDatabase.DatabaseVariant(files, _ => true) },
+                    f => f.EndsWith("NoPch.cpp") ? null : pch, fixups);
+
+                var byFile = Newtonsoft.Json.Linq.JArray.Parse(File.ReadAllText(files))
+                    .ToDictionary(e => Path.GetFileName((string)e["file"]), e => e["arguments"].Select(a => (string)a).ToList());
+                System.Collections.Generic.List<string> Forced(string name) => byFile[name].Where(a => a.StartsWith("/FI")).ToList();
+                Assert.Equal(new[] { "/FIGame/Definitions.h", "/FI" + pch, "/FI" + fixups }, Forced("A.cpp"));
+                Assert.Equal(new[] { "/FIGame/Definitions.h", "/FI" + fixups }, Forced("NoPch.cpp"));
+                Assert.Equal(new[] { "/FIGame/Definitions.h", "/FI" + pch }, Forced("C.c"));
+
+                // Unity entry: options, shared flags, PCH, fixups, then the unity source.
+                CompileDatabase.BuildUnity(files, Path.Combine(root, "db", "unity.json"), Path.Combine(root, "db", "unity"), null);
+                var unit = Newtonsoft.Json.Linq.JArray.Parse(File.ReadAllText(Path.Combine(root, "db", "unity.json")))
+                    .Select(e => e["arguments"].Select(a => (string)a).ToList())
+                    .Single(a => a.Contains("/FI" + pch) && a.Contains("/FI" + fixups));
+                int n = unit.Count;
+                Assert.StartsWith("@", unit[n - 4]);
+                Assert.Equal("/FI" + pch, unit[n - 3]);
+                Assert.Equal("/FI" + fixups, unit[n - 2]);
+                Assert.EndsWith(".cpp", unit[n - 1]);
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch (IOException) { }
+            }
+        }
+
+        [Theory]
+        [InlineData(19, 4)]
+        [InlineData(3, 2)]
+        [InlineData(0, int.MaxValue)]
+        public void IndexingThreadsFitTheAvailableMemory(double availableGb, int threads) =>
+            Assert.Equal(threads, ClangdClient.ByAvailableMemory(availableGb));
+
+        [Fact]
         public void FullDatabaseKeepsTheProjectUnitsUnchanged()
         {
             var root = Path.Combine(Path.GetTempPath(), "us-variants-" + Guid.NewGuid().ToString("N"));

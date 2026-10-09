@@ -128,6 +128,43 @@ namespace UnrealSense.Clang
             }
         }
 
+        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+        static extern bool QueryProcessCycleTime(IntPtr process, out ulong cycles);
+
+        /// <summary>
+        /// CPU cycles used by clangd so far (0 when unknown). Unlike <see cref="CpuTime"/>, which some machines
+        /// (tick-based accounting) undercount by up to 8x, cycles are counted exactly; divide by the TSC rate.
+        /// </summary>
+        public ulong CpuCycles
+        {
+            get
+            {
+                try
+                {
+                    var p = process;
+                    if (p == null || p.HasExited) return 0;
+                    return QueryProcessCycleTime(p.Handle, out var cycles) ? cycles : 0;
+                }
+                catch (Exception)
+                {
+                    return 0;
+                }
+            }
+        }
+
+        /// <summary>Rate of the counter behind <see cref="CpuCycles"/> (the processor's nominal frequency), in Hz.</summary>
+        public static double CycleRateHz => cycleRate.Value;
+        static readonly Lazy<double> cycleRate = new Lazy<double>(() =>
+        {
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0"))
+                    if (key?.GetValue("~MHz") is int mhz && mhz > 0) return mhz * 1e6;
+            }
+            catch (Exception) { }
+            return 3e9;
+        });
+
         /// <summary>Working set of the clangd process in bytes (0 when not running).</summary>
         public long MemoryBytes
         {
@@ -159,11 +196,21 @@ namespace UnrealSense.Clang
             // by several units at once, thousands more index files written) saturates the single-threaded antivirus
             // scanner every file open/write goes through, and indexing gets slower, not faster.
             int byCpu = Math.Min(MaxAutomaticJobs, Math.Max(1, Environment.ProcessorCount * 3 / 4));
-            var totalGb = MemoryInfo.TotalPhysicalBytes / (1024.0 * 1024 * 1024);
+            const double gb = 1024.0 * 1024 * 1024;
+            var totalGb = MemoryInfo.TotalPhysicalBytes / gb;
             if (totalGb <= 0) return byCpu;
             int byMemory = Math.Max(1, (int)((totalGb - 8) / 4.5)); // a 384-file unity unit peaks around 3-4 GB
-            return Math.Min(byCpu, byMemory);
+            return Math.Min(Math.Min(byCpu, byMemory), ByAvailableMemory(MemoryInfo.AvailablePhysicalBytes / gb));
         }
+
+        /// <summary>
+        /// Threads that fit in the memory free right now (Visual Studio, the editor and their tools often hold half
+        /// of it): measured on a source-built engine, 384-file units, 4 threads peaked at 15.5 GB of clangd (about
+        /// 3.5 GB per thread plus the index); with 63.7 GB installed but 19 GB available, the 8 threads chosen from
+        /// the installed memory alone would need about 28 GB at the peak, so Windows would page.
+        /// </summary>
+        public static int ByAvailableMemory(double availableGb) =>
+            availableGb <= 0 ? int.MaxValue : Math.Max(2, (int)((availableGb - 2) / 3.5));
 
         /// <param name="jobs">Background indexing threads; 0 = automatic (see <see cref="AutomaticJobs"/>).</param>
         /// <param name="lowPriority">Index below normal priority: uses idle cores only, slower on a busy machine.</param>

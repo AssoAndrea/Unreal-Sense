@@ -128,7 +128,7 @@ namespace UnrealSense.Extension.Services
                 client = c;
                 workspace.CodeFilesChanged += ForwardFileChanges;
                 StartMonitor(c);
-                Log.Write($"clangd indexing threads: {c.Jobs} (RAM {Gb(MemoryInfo.TotalPhysicalBytes)} GB, " +
+                Log.Write($"clangd indexing threads: {c.Jobs} (RAM {Gb(MemoryInfo.TotalPhysicalBytes)} GB, {Gb(MemoryInfo.AvailablePhysicalBytes)} GB available, " +
                           $"{Environment.ProcessorCount} logical cores, {(General.Instance.SemanticIndexLowPriority ? "low" : "normal")} priority)");
                 if (counts.HasValue)
                     Log.Write(fullPhase
@@ -206,12 +206,21 @@ namespace UnrealSense.Extension.Services
             string lastProgress = null;
             var lastChange = DateTime.UtcNow;
             bool warned = false;
+            ulong lastCycles = c.CpuCycles;
+            var lastTick = DateTime.UtcNow;
             monitor = new System.Threading.Timer(_ =>
             {
+                // Busy cores from CPU cycles: Windows' CPU time (Task Manager, TotalProcessorTime) undercounted clangd
+                // by up to 8x on a machine with tick-based accounting, so it cannot tell CPU-bound from waiting.
+                ulong cycles = c.CpuCycles;
+                var now = DateTime.UtcNow;
+                double cores = cycles > lastCycles ? (cycles - lastCycles) / ClangdClient.CycleRateHz / Math.Max(1, (now - lastTick).TotalSeconds) : 0;
+                lastCycles = cycles;
+                lastTick = now;
                 if (c != client || c.State != ClangdState.Indexing) return;
                 var progress = $"{c.IndexPercentage}% {c.IndexMessage}";
                 if (progress != lastProgress) { lastProgress = progress; lastChange = DateTime.UtcNow; warned = false; }
-                var line = $"index{PhaseLabel}: {progress}; clangd {Gb(c.MemoryBytes)} GB; free RAM {Gb(MemoryInfo.AvailablePhysicalBytes)}/{Gb(MemoryInfo.TotalPhysicalBytes)} GB" +
+                var line = $"index{PhaseLabel}: {progress}; clangd {Gb(c.MemoryBytes)} GB, {cores:F1} busy cores; free RAM {Gb(MemoryInfo.AvailablePhysicalBytes)}/{Gb(MemoryInfo.TotalPhysicalBytes)} GB" +
                            (c.UnitsWithErrors > 0 ? $"; {c.UnitsWithErrors} unit(s) with compile errors" : "");
                 Log.Write(line);
                 if (!warned && DateTime.UtcNow - lastChange > TimeSpan.FromMinutes(10))

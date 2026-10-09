@@ -70,7 +70,7 @@ namespace UnrealSense.Clang
         }
 
         /// <summary>Bump when the sanitized output changes shape, so existing databases are rewritten.</summary>
-        public const int FormatVersion = 19;
+        public const int FormatVersion = 20;
         const string StampFile = "unrealsense-db.txt";
         /// <summary>One command per source file: used to give clangd the exact flags of a file opened in the editor.</summary>
         public const string FilesVariant = "compile_commands.files.json";
@@ -164,7 +164,9 @@ namespace UnrealSense.Clang
             if (engineDir != null) { pchRoots.Add(Path.Combine(engineDir, "Source")); pchRoots.Add(Path.Combine(engineDir, "Plugins")); }
             var pchResolver = new PchResolver(pchRoots);
             log?.Invoke($"precompiled headers: {pchResolver.ModuleCount:N0} module rules read in {pchWatch.Elapsed.TotalSeconds:F1}s");
-            int total = Sanitize(rawFile, new[] { files }, pchResolver.Find);
+            var fixups = WriteIndexFixups(output, engineDir);
+            if (fixups != null) log?.Invoke("index fixups: " + fixups);
+            int total = Sanitize(rawFile, new[] { files }, pchResolver.Find, fixups);
 
             var unityDir = Path.Combine(output, "unity");
             if (Directory.Exists(unityDir)) Directory.Delete(unityDir, recursive: true);
@@ -351,10 +353,11 @@ namespace UnrealSense.Clang
                         writer.WriteStartArray();
                         writer.WriteValue(first.Compiler);
                         // Order of forced includes: Definitions.h (in the .rsp), the *_API neutralizer (last in the
-                        // .rsp), then the precompiled header, which needs both, then the sources.
-                        foreach (var option in first.Options.Where(o => !IsPchInclude(o))) writer.WriteValue(option);
+                        // .rsp), then the precompiled header, which needs both, then the index fixups, then the sources.
+                        foreach (var option in first.Options.Where(o => !IsPchInclude(o) && !IsFixupsInclude(o))) writer.WriteValue(option);
                         writer.WriteValue("@" + flagsFile);
                         foreach (var option in first.Options.Where(IsPchInclude)) writer.WriteValue(option);
+                        foreach (var option in first.Options.Where(IsFixupsInclude)) writer.WriteValue(option);
                         writer.WriteValue(unityFile);
                         writer.WriteEndArray();
                         writer.WriteEndObject();
@@ -426,7 +429,8 @@ namespace UnrealSense.Clang
                 else if (a.StartsWith("/I") || a.StartsWith("-I")) member.Includes.Add("/I" + a.Substring(2));
                 else if (a == "/FI" || a == "-include") member.Forced.Add("/FI" + Next());
                 // The PCH stays in the options (part of the grouping key): a unit never mixes precompiled headers.
-                else if (IsPchInclude(a)) member.Options.Add(a);
+                // So do the index fixups, which must follow it.
+                else if (IsPchInclude(a) || IsFixupsInclude(a)) member.Options.Add(a);
                 else if (a.StartsWith("/FI")) member.Forced.Add(a);
                 else if (a == "/D" || a == "-D") member.Defines.Add("/D" + Next());
                 else if (a.StartsWith("/D") || a.StartsWith("-D")) member.Defines.Add("/D" + a.Substring(2));
@@ -481,6 +485,65 @@ namespace UnrealSense.Clang
             var header = Normalize(Path.Combine(unityDir, name + ".api.h"));
             WriteIfChanged(header, text.ToString());
             return header;
+        }
+
+        /// <summary>Header with the index fixups, in the database folder.</summary>
+        public const string FixupsFile = "unrealsense-index-fixups.h";
+
+        static bool IsFixupsInclude(string arg) =>
+            arg.StartsWith("/FI", StringComparison.OrdinalIgnoreCase) && arg.EndsWith(FixupsFile, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Writes the header force-included after the PCH to make clang accept code that MSVC accepts and clang rejects,
+        /// for indexing only (never used to build). Returns its path, or null (and no file) when this engine needs none.
+        /// <para>Engines with the AngelScript integration (ERASE_* macros in UObject/CoreNative.h) make every
+        /// UFUNCTION table of the UHT code ("static constexpr FClassNativeFunction Funcs[]", in every .gen.cpp) call
+        /// <c>ASAutoCaller::GetReflectedFunctionPointers</c> through <c>ERASE_METHOD_PTR</c>/<c>ERASE_FUNCTION_PTR</c>; it is
+        /// constexpr but casts a function pointer to void*, which clang rejects in a constant expression ("constexpr variable
+        /// 'Funcs' must be initialized by a constant expression"): measured, 14 of 24 errors of a 384-file engine unit, and an
+        /// error in every unit with UHT code. The macros are redefined to keep the reference to the method (still found by
+        /// Find Usages) without the call.</para>
+        /// </summary>
+        public static string WriteIndexFixups(string outputDir, string engineDir)
+        {
+            var path = Path.Combine(outputDir, FixupsFile);
+            string coreNative = null;
+            try
+            {
+                if (engineDir != null)
+                    coreNative = File.ReadAllText(Path.Combine(engineDir, "Source", "Runtime", "CoreUObject", "Public", "UObject", "CoreNative.h"));
+            }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+            bool angelScript = coreNative != null
+                && System.Text.RegularExpressions.Regex.IsMatch(coreNative, @"#\s*define\s+ERASE_METHOD_PTR\b.*GetReflectedFunctionPointers")
+                && System.Text.RegularExpressions.Regex.IsMatch(coreNative, @"#\s*define\s+ERASE_NO_FUNCTION\b");
+            if (!angelScript)
+            {
+                if (File.Exists(path)) File.Delete(path);
+                return null;
+            }
+            Directory.CreateDirectory(outputDir);
+            WriteIfChanged(path, string.Join("\n",
+                "// UnrealSense: index-only fixups (never used to build). See CompileDatabase.WriteIndexFixups.",
+                "#pragma once",
+                "#if defined(__cplusplus)",
+                "// AngelScript integration: GetReflectedFunctionPointers casts a function pointer to void* in a constexpr call,",
+                "// which clang rejects in the UFUNCTION tables of the UHT code. Keep the reference, drop the call.",
+                "#if !defined(ERASE_METHOD_PTR) && defined(COREUOBJECT_API) && __has_include(\"UObject/CoreNative.h\")",
+                "#include \"UObject/CoreNative.h\"",
+                "#endif",
+                "#if defined(ERASE_METHOD_PTR) && defined(ERASE_NO_FUNCTION)",
+                "#undef ERASE_METHOD_PTR",
+                "#define ERASE_METHOD_PTR(c, m, p, r) ((void)static_cast<r(c::*)p>(&c::m), ERASE_NO_FUNCTION())",
+                "#endif",
+                "#if defined(ERASE_FUNCTION_PTR) && defined(ERASE_NO_FUNCTION)",
+                "#undef ERASE_FUNCTION_PTR",
+                "#define ERASE_FUNCTION_PTR(f, p, r) ((void)static_cast<r(*)p>(f), ERASE_NO_FUNCTION())",
+                "#endif",
+                "#endif",
+                ""));
+            return path;
         }
 
         /// <summary>A forced include of a precompiled header (EngineSharedPCH.h, MyModulePrivatePCH.h...).</summary>
@@ -677,7 +740,8 @@ namespace UnrealSense.Clang
         /// projects grow past a gigabyte. Returns the number of entries read.
         /// </summary>
         /// <param name="pchFor">Precompiled header UBT would force-include for a source file (see <see cref="PchResolver"/>).</param>
-        public static int Sanitize(string inputFile, IReadOnlyList<DatabaseVariant> variants, Func<string, string> pchFor = null)
+        /// <param name="fixups">Header force-included after the PCH in C++ files (see <see cref="WriteIndexFixups"/>), or null.</param>
+        public static int Sanitize(string inputFile, IReadOnlyList<DatabaseVariant> variants, Func<string, string> pchFor = null, string fixups = null)
         {
             var outputDir = System.IO.Path.GetDirectoryName(variants[0].Path);
             var rspDir = System.IO.Path.Combine(outputDir, "rsp");
@@ -722,12 +786,12 @@ namespace UnrealSense.Clang
                         // UBT's database is generated with -NoPCH: add the PCH the real build force-includes, right
                         // after the module's Definitions.h, so code relying on it for some includes still compiles.
                         var pch = pchFor?.Invoke(FullPath(file, directory));
-                        if (pch != null)
-                        {
-                            int definitions = cleaned.FindLastIndex(x => x.StartsWith("/FI", StringComparison.OrdinalIgnoreCase)
-                                                                        && x.EndsWith("Definitions.h", StringComparison.OrdinalIgnoreCase));
-                            cleaned.Insert(definitions >= 0 ? definitions + 1 : cleaned.Count, "/FI" + pch);
-                        }
+                        int definitions = cleaned.FindLastIndex(x => x.StartsWith("/FI", StringComparison.OrdinalIgnoreCase)
+                                                                    && x.EndsWith("Definitions.h", StringComparison.OrdinalIgnoreCase));
+                        int insertAt = definitions >= 0 ? definitions + 1 : cleaned.Count;
+                        if (pch != null) cleaned.Insert(insertAt++, "/FI" + pch);
+                        // The fixups redefine macros of the engine's headers: after the PCH, which usually defines them.
+                        if (fixups != null && !file.EndsWith(".c", StringComparison.OrdinalIgnoreCase)) cleaned.Insert(insertAt, "/FI" + Normalize(fixups));
 
                         foreach (var i in targets)
                         {
