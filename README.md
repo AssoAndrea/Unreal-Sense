@@ -36,7 +36,8 @@ UnrealSense generates on the first start and again when the build rules change o
 With the option on, **Find Usages** appears in the editor's context menu and under Extensions › UnrealSense.
 `Index the whole engine` also indexes every engine and plugin source file (about 100k files). Log lines start with
 `OwnIndex:`. Uses on an object whose type the indexer cannot infer are listed apart, under "Uncertain" at the bottom of the
-results, instead of being guessed.
+results, instead of being guessed. The code lines in the results are coloured with the editor's colours (Tools › Options ›
+Fonts and Colors: keywords, strings, comments, macros, Unreal types, calls, members), the searched name in bold.
 
 ## Installing and updating
 

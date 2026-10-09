@@ -75,24 +75,29 @@ namespace UnrealSense.Extension.ToolWindows
             public string Asset => Usage.Asset.AssetName;
             public string Type => Usage.Asset.AssetClass;
             public string Package => Usage.Asset.PackageName;
-            public string Detail => Usage.Detail ?? (Usage.IsHeuristic ? "name match" : "");
+            public string ObjectPath => Package == null ? Asset : $"{Package}.{Asset}";
+            public string Detail =>Usage.Detail ?? (Usage.IsHeuristic ? "name match" : "");
         }
 
         readonly TextBlock header = new TextBlock { Margin = new Thickness(6, 4, 6, 4), FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap };
         readonly ListView list = new ListView { BorderThickness = new Thickness(0) };
+        readonly GridView grid = new GridView();
 
         public BlueprintUsagesControl()
         {
             UiHelpers.ApplyTheme(this);
 
-            var grid = new GridView();
-            foreach (var (title, path, width) in new[] { ("Usage", "Kind", 190.0), ("Asset", "Asset", 220.0), ("Type", "Type", 130.0), ("Package", "Package", 380.0), ("Detail", "Detail", 140.0) })
-                grid.Columns.Add(new GridViewColumn { Header = title, DisplayMemberBinding = new Binding(path), Width = width });
+            // NaN = sized to the content: long package paths must stay readable (fixed widths cut them).
+            foreach (var (title, path) in new[] { ("Usage", "Kind"), ("Asset", "Asset"), ("Type", "Type"), ("Detail", "Detail"), ("Package", "Package") })
+                grid.Columns.Add(new GridViewColumn { Header = title, DisplayMemberBinding = new Binding(path), Width = double.NaN });
             list.View = grid;
-            list.ItemContainerStyle = UiHelpers.ThemedListViewItemStyle();
+            var rowStyle = new Style(typeof(ListViewItem), UiHelpers.ThemedListViewItemStyle());
+            rowStyle.Setters.Add(new Setter(FrameworkElement.ToolTipProperty, new Binding(nameof(Row.ObjectPath))));
+            list.ItemContainerStyle = rowStyle;
             list.SetResourceReference(Control.BackgroundProperty, EnvironmentColors.ToolWindowBackgroundBrushKey);
             list.SetResourceReference(Control.ForegroundProperty, EnvironmentColors.ToolWindowTextBrushKey);
             list.MouseDoubleClick += (s, e) => OpenSelected();
+            list.SizeChanged += (s, e) => { if (e.WidthChanged) FillLastColumn(); };
 
             var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(6, 2, 6, 4) };
             toolbar.Children.Add(UiHelpers.ToolbarButton("Open in Unreal Editor", KnownMonikers.Run, OpenSelected, "Open the asset in the running Unreal Editor (double-click does the same)"));
@@ -117,6 +122,36 @@ namespace UnrealSense.Extension.ToolWindows
                 : $"{title}: {usages.Count} usage{(usages.Count == 1 ? "" : "s")} in {assets} asset{(assets == 1 ? "" : "s")}"
                   + (usages.Any(u => u.IsHeuristic) ? " — property matches are based on the asset name table" : "");
             list.ItemsSource = usages.Select(u => new Row { Usage = u }).ToList();
+            FitColumns();
+        }
+
+        // An auto-sized GridViewColumn measures only the first rows it shows; with new results it keeps the old width
+        // unless the width is set and reset to NaN after the rows are laid out.
+        void FitColumns() =>
+            Dispatcher.BeginInvoke(new Action(() =>
+            {
+                foreach (var column in grid.Columns)
+                {
+                    column.Width = column.ActualWidth;
+                    column.Width = double.NaN;
+                }
+                // The auto widths are known only after the next layout pass.
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    packageContentWidth = grid.Columns.Last().ActualWidth;
+                    FillLastColumn();
+                }), System.Windows.Threading.DispatcherPriority.Loaded);
+            }), System.Windows.Threading.DispatcherPriority.Loaded);
+
+        double packageContentWidth;
+
+        /// <summary>The last column (Package) takes the rest of the window, never less than its longest path.</summary>
+        void FillLastColumn()
+        {
+            if (grid.Columns.Count == 0 || packageContentWidth <= 0) return;
+            double others = grid.Columns.Take(grid.Columns.Count - 1).Sum(c => c.ActualWidth);
+            double available = list.ActualWidth - others - SystemParameters.VerticalScrollBarWidth - 8;
+            grid.Columns.Last().Width = Math.Max(packageContentWidth, available);
         }
 
         void OpenSelected()

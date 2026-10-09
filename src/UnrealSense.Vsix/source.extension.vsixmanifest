@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="UnrealSense.c6a3e5b2-4f0e-4b8e-9f1d-2a7c9e1b5d40" Version="0.3.18" Language="en-US" Publisher="Andrea De Caro" />
+    <Identity Id="UnrealSense.c6a3e5b2-4f0e-4b8e-9f1d-2a7c9e1b5d40" Version="0.3.19" Language="en-US" Publisher="Andrea De Caro" />
     <DisplayName>UnrealSense</DisplayName>
     <Description xml:space="preserve">Unreal Engine productivity for Visual Studio: reflection-aware completion for UCLASS/UPROPERTY/UFUNCTION specifiers and metadata, UHT inspections with quick fixes, Blueprint usages of C++ classes, functions and properties, and an Unreal project explorer.</Description>
     <Icon>Resources\Icon.png</Icon>

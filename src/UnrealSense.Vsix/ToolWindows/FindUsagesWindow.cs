@@ -113,7 +113,9 @@ namespace UnrealSense.Extension.ToolWindows
                            + (results.Blueprints.Count > 0 ? $" · {results.Blueprints.Count} Blueprint usage{(results.Blueprints.Count == 1 ? "" : "s")}" : "")
                            + $" · {results.Source ?? "text search"} · {results.Milliseconds:F0} ms";
 
-            foreach (var fileNode in FileNodes(visible))
+            // Reloaded on every rebuild: cheap, and follows a theme or Fonts and Colors change.
+            var colors = CodeColors.Load();
+            foreach (var fileNode in FileNodes(visible, colors))
                 tree.Items.Add(fileNode);
 
             if (results.Blueprints.Count > 0)
@@ -132,27 +134,29 @@ namespace UnrealSense.Extension.ToolWindows
                 var node = UiHelpers.Node("Uncertain", KnownMonikers.StatusHelp, null, null,
                     $"({uncertain.Count}) the name on an object whose type could not be inferred: may be other symbols");
                 node.IsExpanded = true;
-                foreach (var fileNode in FileNodes(uncertain))
+                foreach (var fileNode in FileNodes(uncertain, colors))
                     node.Items.Add(fileNode);
                 tree.Items.Add(node);
             }
         }
 
-        static IEnumerable<TreeViewItem> FileNodes(IEnumerable<CodeUsage> usages)
+        static IEnumerable<TreeViewItem> FileNodes(IEnumerable<CodeUsage> usages, CodeColors colors)
         {
             var project = WorkspaceService.Current?.Project?.ProjectDirectory;
+            var symbols = WorkspaceService.Current?.Symbols;
+            Func<string, bool> isKnownType = symbols == null ? null : (Func<string, bool>)(name => symbols.FindType(name) != null);
             foreach (var group in usages.GroupBy(u => u.FilePath, StringComparer.OrdinalIgnoreCase).OrderBy(g => g.Key))
             {
                 var display = project != null && group.Key.StartsWith(project, StringComparison.OrdinalIgnoreCase) ? group.Key.Substring(project.Length).TrimStart('\\') : group.Key;
                 var fileNode = UiHelpers.Node(Path.GetFileName(group.Key), FileIcon(group.Key), null, null, $"{Path.GetDirectoryName(display)}  ({group.Count()})", expanded: false);
                 fileNode.IsExpanded = true;
                 foreach (var usage in group.OrderBy(u => u.Line))
-                    fileNode.Items.Add(UsageNode(usage));
+                    fileNode.Items.Add(UsageNode(usage, colors, isKnownType));
                 yield return fileNode;
             }
         }
 
-        static TreeViewItem UsageNode(CodeUsage u)
+        static TreeViewItem UsageNode(CodeUsage u, CodeColors colors, Func<string, bool> isKnownType)
         {
             var text = u.LineText ?? "";
             int lead = text.Length - text.TrimStart().Length;
@@ -162,13 +166,7 @@ namespace UnrealSense.Extension.ToolWindows
             var block = new TextBlock { FontFamily = new System.Windows.Media.FontFamily("Consolas") };
             block.Inlines.Add(new Run($"{u.Line + 1,5}  ") { FontStyle = FontStyles.Italic });
             if (start <= trimmed.Length)
-            {
-                block.Inlines.Add(new Run(trimmed.Substring(0, start)));
-                var match = new Run(trimmed.Substring(start, Math.Max(0, end - start))) { FontWeight = FontWeights.Bold };
-                match.SetResourceReference(TextElement.ForegroundProperty, EnvironmentColors.ControlLinkTextBrushKey);
-                block.Inlines.Add(match);
-                block.Inlines.Add(new Run(trimmed.Substring(Math.Min(end, trimmed.Length))));
-            }
+                AddCode(block, trimmed, start, end, colors, isKnownType);
             var kindLabel = new TextBlock { Text = u.Kind.ToString().ToLowerInvariant(), Opacity = 0.55, Margin = new Thickness(0, 0, 8, 0), Width = 70 };
             var panel = new StackPanel { Orientation = Orientation.Horizontal };
             panel.Children.Add(new CrispImage { Moniker = KindIcon(u.Kind), Width = 16, Height = 16, Margin = new Thickness(0, 0, 4, 0) });
@@ -176,6 +174,33 @@ namespace UnrealSense.Extension.ToolWindows
             panel.Children.Add(block);
             Action open = () => EditorNavigation.OpenAtLineAsync(u.FilePath, u.Line, u.Column).FireAndForget();
             return new TreeViewItem { Header = panel, Tag = open };
+        }
+
+        /// <summary>The line split into runs of the same syntax colour; the searched name [matchStart, matchEnd) is bold and marked.</summary>
+        static void AddCode(TextBlock block, string line, int matchStart, int matchEnd, CodeColors colors, Func<string, bool> isKnownType)
+        {
+            var kinds = new HighlightKind[line.Length];
+            foreach (var span in LineHighlighter.Highlight(line, isKnownType))
+                for (int i = span.Start; i < span.Start + span.Length && i < kinds.Length; i++)
+                    kinds[i] = span.Kind;
+
+            int runStart = 0;
+            for (int i = 1; i <= line.Length; i++)
+            {
+                bool boundary = i == line.Length || kinds[i] != kinds[runStart] || i == matchStart || i == matchEnd;
+                if (!boundary) continue;
+                var run = new Run(line.Substring(runStart, i - runStart));
+                var foreground = colors.Get(kinds[runStart]);
+                if (foreground != null) run.Foreground = foreground;
+                if (runStart >= matchStart && runStart < matchEnd)
+                {
+                    run.FontWeight = FontWeights.Bold;
+                    if (colors.MatchBackground != null) run.Background = colors.MatchBackground;
+                    else if (foreground == null) run.SetResourceReference(TextElement.ForegroundProperty, EnvironmentColors.ControlLinkTextBrushKey);
+                }
+                block.Inlines.Add(run);
+                runStart = i;
+            }
         }
 
         void Activate()
